@@ -1,4 +1,4 @@
-function [Offset] = Determine_Pixel_Offset_Over_Time(VideoMatrix,BWVideoMatrix,...
+function [Offset] = Single_Particle_Tracking(VideoMatrix,BWVideoMatrix,...
             FigureHandles,Options)
     
     % Tell the user what is going on
@@ -74,16 +74,16 @@ function [Offset] = Determine_Pixel_Offset_Over_Time(VideoMatrix,BWVideoMatrix,.
         Pos.x(CurrFrame) = XNew;
 
         
-        %Plot out the tracking for diagnostic purposes
-            figure(33)
-            ImToShow = VideoMatrix(...
-                           round(YStart)-2.5*Search_Radius:round(YStart)+2.5*Search_Radius,...
-                           round(XStart)-2.5*Search_Radius:round(XStart)+2.5*Search_Radius,...
-                           CurrFrame);
-            imshow(ImToShow, [Options.MinImageShow, Options.MaxImageShow], 'InitialMagnification', 'fit');
-            hold on;
-            plot(XNew+2.5*Search_Radius+1-XStart,YNew+2.5*Search_Radius+1-YStart,'go')
-            drawnow;
+        %Plot out the tracking for diagnostic purposes  --> Matt: My laptop crashes out when I plot it
+            % figure(33)
+            % ImToShow = VideoMatrix(...
+            %                round(YStart)-2.5*Search_Radius:round(YStart)+2.5*Search_Radius,...
+            %                round(XStart)-2.5*Search_Radius:round(XStart)+2.5*Search_Radius,...
+            %                CurrFrame);
+            % imshow(ImToShow, [Options.MinImageShow, Options.MaxImageShow], 'InitialMagnification', 'fit');
+            % hold on;
+            % plot(XNew+2.5*Search_Radius+1-XStart,YNew+2.5*Search_Radius+1-YStart,'go')
+            % drawnow;
 
 
     end

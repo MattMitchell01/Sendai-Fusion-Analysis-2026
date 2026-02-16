@@ -105,45 +105,56 @@ close all
         end
 
         if ~strcmp(Options.GrabExampleTrace,'y')
+            
             % Ask user if we need to change any of the designations on the current round of plots
             RerunThisRound = 'y';
-            while RerunThisRound =='y'
-                
-                Prompts = {strcat(num2str(b),'/', num2str(NumReviewRounds),'; List IncorrectNumber.DesigCode')};
-                DefaultInputs = {'No Correction Needed'};
-                Heading = 'Type q to quit';
-                UserAnswer = inputdlg(Prompts,Heading, 1, DefaultInputs, 'on');
-    
-                if isempty(UserAnswer)
-                    % There has been an error, re-run the last round to avoid crash
-                    RerunThisRound = 'y';
-                    
-                elseif strcmp(UserAnswer{1,1},'q')
+            
+
+            %==============================================================================
+            % New Version of Prompting the User: Through the Console
+            %==============================================================================
+            % old way used Matlab's modal dialog box which would bug out
+            
+            while RerunThisRound == 'y'
+
+                fprintf('%d/%d; Enter IncorrectPlotIndices\n', b, NumReviewRounds);
+                fprintf('Format: 5.3, 9.3\n');
+                fprintf('Press Enter = No Correction Needed | q = quit\n');
+            
+                s = strtrim(input('> ', 's'));
+            
+                % Enter → no correction
+                if isempty(s)
+                    RerunThisRound = 'n';
+                    continue
+                end
+            
+                % Quit
+                if strcmpi(s, 'q')
                     disp('   You Chose To Quit')
                     disp('   Program terminated.')
                     disp('====================================')
                     return
-                
-                elseif strcmp(UserAnswer{1,1},'No Correction Needed')
-                    % Everything is correct, move to next round
-                    RerunThisRound = 'n';
-                    
-                else
-                    
-                    % Extract User Inputs
-                    IncorrectPlotIndices = str2num(UserAnswer{1,1}); 
-                    
-                    if isvector(IncorrectPlotIndices)
-                        % User has indicated that we need to correct some designations                
-                        
-                        [RerunThisRound, CorrectedAnalysisData, ErrorCounter] = Correct_Designations(IncorrectPlotIndices,...
-                            PreviousAnalysisData,CurrentTraceRange,CorrectedAnalysisData,ErrorCounter,Options,UniversalData,FigureHandles);
-                        
-                    else
-                        % There has been an error, re-run the last round to avoid crash
-                        RerunThisRound = 'y';
-                    end
                 end
+            
+                % Replace commas with spaces so str2num works
+                s = strrep(s, ',', ' ');
+            
+                % Convert to numeric vector
+                IncorrectPlotIndices = str2num(s); 
+            
+                % Validate
+                if isempty(IncorrectPlotIndices) || ~isvector(IncorrectPlotIndices)
+                    disp('Invalid input. Use format: number.code, number.code   e.g. 5.3, 9.3')
+                    RerunThisRound = 'y';
+                    continue
+                end 
+            
+                % Call Correct_Designations
+                [RerunThisRound, CorrectedAnalysisData, ErrorCounter] = Correct_Designations( ...
+                    IncorrectPlotIndices, PreviousAnalysisData, CurrentTraceRange, ...
+                    CorrectedAnalysisData, ErrorCounter, Options, UniversalData, FigureHandles);
+            
             end
             
             DataCounters.CurrentErrorCount = ErrorCounter;

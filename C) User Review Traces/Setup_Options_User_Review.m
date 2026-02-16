@@ -12,7 +12,7 @@ function [Options] = Setup_Options_User_Review()
 
     % ------Options to double check-------
         Options.Label = '-Revd';
-        Options.ApplyFilter = 'y';
+        Options.ApplyFilter = 'n';
             % 'y' or 'n'. 
             % WARNING: If 'y', look in Plot_Current_Trace to make sure that
             % you are applying the filter you want. It will make some

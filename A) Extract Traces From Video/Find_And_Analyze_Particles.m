@@ -11,7 +11,7 @@ function [Results,VirusDataToSave, OtherDataToSave,Options] =...
         
         [ImageWidth,NumFrames,ImageHeight,BitDepth,VideoMatrix,...
         BWVideoMatrix,ThresholdToFindParticles,TotalVideoIntensity,AverageVideoIntensity,...
-        RoughBackground,FigureHandles,TimeVector,VideoTimeVector,StandardBindTime,FindingImage] =...
+        RoughBackground,FigureHandles,TimeVector,VideoTimeVector,StandardBindTime,FindingImage,Options.FocusFrameNumbers] =...
             Create_Video_Matrix_Auto_Time_Vector(VideoFilePath,Options);
     
     else
@@ -42,12 +42,69 @@ if Options.GrabTotalIntensityOnly ~= 'y'
     NumGoodParticles = 0;
     NumBadParticles = 0;
     
-    % If we are determining the pixel offset by tracking a virus, then do so now
-    if strcmp(Options.DeterminePixelOffset,'y')
-        [Offset] = Determine_Pixel_Offset_Over_Time(VideoMatrix,BWVideoMatrix,...
-            FigureHandles,Options);
-    end
+    % If we are determining the sample-wide XY offset, then do so now
+    if strcmp(Options.DeterminePixelOffset, 'y')
+
+        % If FFT method is prefered, perform the calculation
+        if strcmp(Options.FFTOffset, 'y')
+            [Offset] = Fast_Fourier_Transform(VideoMatrix, ImageWidth, ImageHeight, NumFrames, Options);
+            figure;
+            plot(Offset.x, 'b');
+            hold on;
+            plot(Offset.y, 'r');
+            hold off;
+    
+            legend('X shift', 'Y shift');
+            xlabel('Frame');
+            ylabel('Pixels');
+            title('XY Drift Over Time');
+            
+            Options.Offsets = Offset;
+            
+            % Prompt the user to review a plot of the X Y offset vectors
+            disp(' ')
+            disp('Review the XY shift plots.')
+            disp('Good FFT shifts should be generally smooth and continuous over time.')
+            disp('Bad shifts often show sudden large jumps or irregular behavior.')
+            disp(' ')
+            userResp = input('Do you approve of the XY shifting graph? (y = yes, anything else = no): ','s');
+            
+            if strcmpi(strtrim(userResp),'y')
+                disp(' ')
+                Options.SingleParticleTrackingOffset = 'n';     % In case somebody had both FFT and SPT methods enabled
+                disp('FFT-based XY shifting approved. Proceeding...')
+            else
+                disp(' ')
+                disp('Looks like FFT did not work this time.')
+                disp('You will have to determine XY shifts using single particle tracking.')
         
+                Options.FFTOffset= 'n';
+                Options.SingleParticleTrackingOffset = 'y';
+            end
+        end
+        
+        % If FFT failed or we want to do SPT instead...
+        if strcmp(Options.SingleParticleTrackingOffset,'y')
+            [Offset] = Single_Particle_Tracking(VideoMatrix,BWVideoMatrix,...
+                FigureHandles,Options);
+            Options.Offsets = Offset;
+            figure;
+            plot(Offset.x, 'b');
+            hold on;
+            plot(Offset.y, 'r');
+            hold off;
+    
+            legend('X shift', 'Y shift');
+            xlabel('Frame');
+            ylabel('Pixels');
+            title('XY Drift Over Time');
+            disp(' ')
+            userResp = input('Do you approve of the XY shifting graph? (y = yes, anything else = no): ','s');
+        end
+
+    end
+
+    
     % Now we find all of the particles in the finding image, decide whether 
     % they are "good" or "bad" particles, and grab the integrated intensity 
     % trace within the region of interest around the particle for the entire length 

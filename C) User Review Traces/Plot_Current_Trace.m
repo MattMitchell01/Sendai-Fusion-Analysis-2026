@@ -15,7 +15,7 @@ ChangedByUser = CurrentVirusData.ChangedByUser;
 
 if strcmp(FusionData.Designation,'2 Fuse')
     
-    plot(CurrTrace_Corrected,'r-')
+    plot(CurrTrace_Corrected,'r-')  
     LineToPlot = ylim;
     set(gca,'XTickLabel',''); 
     set(gca,'YTickLabel','');

@@ -9,7 +9,7 @@ function [Options] = Setup_Options_Trace_Analysis(DefaultPathname)
         % Only relevant if Bob style save is on.
         
     Options.MinImageShow = 350;
-    Options.MaxImageShow = 600;
+    Options.MaxImageShow = 600; %600 or 1600 here
 
 %================= Options You Might Change While Optimizing For a Particular Data Type (after consulting Bob) ================
     Options.DisplayFigures = 'y';

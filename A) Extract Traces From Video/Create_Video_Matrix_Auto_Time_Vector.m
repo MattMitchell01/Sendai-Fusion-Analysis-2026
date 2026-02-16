@@ -1,78 +1,94 @@
 function [ImageWidth,NumFramesActuallyAnalyzed,ImageHeight,BitDepth,VideoMatrix,...
     BWVideoMatrix,ThresholdToFindParticles,TotalVideoIntensity,AverageVideoIntensity,...
-    RoughBackground,FigureHandles,TimeVector,VideoTimeVector,StandardBindTime,FindingImage] =...
+    RoughBackground,FigureHandles,TimeVector,VideoTimeVector,StandardBindTime,FindingImage, FocusIndices] =...
     Create_Video_Matrix_Auto_Time_Vector(VideoFilePath,...
     Options)
 
-    % First, we use the bio formats open function to get the data, and then pull out 
-    % the relevant metadata by creating the appropriate key. If you want to mess 
-    % around with this, you will need to look at the bio formats help documentation 
+    % First, we use the bio formats open function to get the data. Then pull out the information we need
+    % If you want to mess around with this, you will need to look at the bio formats help documentation 
     % for OME.TIF files
-    
     data = bfopen(VideoFilePath);
-
-    metadata = data{1, 2};
-    if strcmp(Options.CombineMultipleVideos,'y')
-        NumFramesInFullVideo = Options.NumFrames(1);
-    else
-        NumFramesInFullVideo = size(data{1,1},1);
-    end
     
+
+    % Extract the OME-XML metadata object returned by bfopen
+    % This contains image dimensions, pixel type, timing, Z positions, etc.
+    metadata = data{1,4};
+
+    % Read spatial dimensions of the image frames
+    ImageWidth  = metadata.getPixelsSizeX(0).getValue();  % pixels
+    ImageHeight = metadata.getPixelsSizeY(0).getValue();  % pixels
+    
+    % First frame to include in analysis
     StartFrameNumber = Options.StartAnalysisFrameNumber;
     
-    if ~strcmp(Options.CombineMultipleVideos,'y') && data{1,1}{NumFramesInFullVideo,1}(1,1) == 0
-        % If the time lapse was cut short, the metadata will still try to find all 
-        % of the images for the length that was originally set.  You'll end up with 
-        % zeros in any image that was not collected. Therefore, we need to exclude 
-        % those from the analysis. We will do that below.
+    % Total number of frames in the OME-TIFF.
+    NumFramesInFullVideo = metadata.getPixelsSizeT(0).getValue();
+    
+    % Determine the pixel type/depth
+    pixelsTypeStr = char(metadata.getPixelsType(0));   % e.g. 'uint16'
+    BitDepth = str2double(regexprep(pixelsTypeStr,'\D',''));
+    
+    % Extract Frame Timestamps from the metadata
+    for i = 1:NumFramesInFullVideo
+        VideoTimeVector(i) = str2double(metadata.getPlaneDeltaT(0,i-1).value()); % in milliseconds (ms)
+    end
 
-        CurrentNonZeroFrameNumberTally = 0;
-        for i = 1:NumFramesInFullVideo
-            if data{1,1}{i,1}(1,1) ~= 0
-                CurrentNonZeroFrameNumberTally = CurrentNonZeroFrameNumberTally + 1;
-            else 
-                break
-            end
+
+
+    %
+    % Now we want to extract the Focus Indices using the Zposition Data
+    % from the Metadata
+    %
+    
+    % Preallocate vector to store Z position for each frame.
+    PositionZ = nan(1, NumFramesInFullVideo);
+    
+    for i = 1:NumFramesInFullVideo
+        z = metadata.getPlanePositionZ(0, i-1);
+        % Read the Z position for plane i (0-based indexing in OME).
+    
+        if ~isempty(z)
+            PositionZ(i) = z.value().doubleValue();
         end
-        NumFramesInFullVideo = CurrentNonZeroFrameNumberTally;
     end
     
-    if NumFramesInFullVideo < 101
-        for i = 1:NumFramesInFullVideo
-            if i < 11
-                VideoTimeVector(i) = str2double(metadata.get(strcat('Plane #','0', num2str(i-1),...
-                ' ElapsedTime-ms')));
-                % VideoTimeVector is the time of the entire video, 
-                % including any frames which are ignored in the trace analysis
-            else
-                VideoTimeVector(i) = str2double(metadata.get(strcat('Plane #', num2str(i-1),...
-                ' ElapsedTime-ms')));
-            end
+    % The list of Frame Indices where focus events will occur
+    FocusIndices = [];
+    
+    for i = StartFrameNumber:(NumFramesInFullVideo-1)
+        % Compare consecutive Z positions starting from the analysis frame.
+    
+        if ~isnan(PositionZ(i)) && ~isnan(PositionZ(i+1)) && ...
+           (PositionZ(i) ~= PositionZ(i+1))
+            FocusIndices(end+1) = i + 1;
+            % Focus event appears in the frame AFTER the Z value changes.
         end
-        BitDepth = str2double(metadata.get(strcat('Plane #00 BitDepth')));
-        ImageWidth = str2double(metadata.get(strcat('Plane #00 Width'))); %in pixels
-        ImageHeight = str2double(metadata.get(strcat('Plane #00 Height'))); %in pixels
-        
-    else
-        for i = 1:NumFramesInFullVideo
-            if i < 11
-                VideoTimeVector(i) = str2double(metadata.get(strcat('Plane #','00', num2str(i-1),...
-                ' ElapsedTime-ms')));
-            elseif i >= 11 && i < 101
-                VideoTimeVector(i) = str2double(metadata.get(strcat('Plane #','0', num2str(i-1),...
-                ' ElapsedTime-ms')));
-            else
-                VideoTimeVector(i) = str2double(metadata.get(strcat('Plane #',num2str(i-1),...
-                ' ElapsedTime-ms')));
-            end
-
-        end
-
-        BitDepth = str2double(metadata.get(strcat('Plane #000 BitDepth')));
-        ImageWidth = str2double(metadata.get(strcat('Plane #000 Width'))); %in pixels
-        ImageHeight = str2double(metadata.get(strcat('Plane #000 Height'))); %in pixels
     end
-  
+
+    
+    % User will now check Focus Indices
+    disp('Detected Focus Indices:');
+    disp(FocusIndices);
+    
+    while true
+        resp = input('Do you approve of these focus indices? (y/n): ', 's');
+    
+        if strcmpi(resp, 'y')
+            disp('Great — moving on!');
+            fprintf('\n')
+            fprintf('\n')
+            break
+        elseif strcmpi(resp, 'n')
+            disp('READ READ READ --> Then you will have to find the focus indices yourself and use the input .txt file.');
+            error('Execution stopped by user.');
+        else
+            disp('Invalid input. Please enter y or n.');
+        end
+    end
+
+
+       
+
     % Depending on the situation, we truncate the time vector. TimeVector is the time associated with the actual
     % trace being measured (so excluding any frames which are ignored in the trace extraction). 
     % This will be the same length or less than VideoTimeVector
@@ -137,7 +153,15 @@ function [ImageWidth,NumFramesActuallyAnalyzed,ImageHeight,BitDepth,VideoMatrix,
         
         NewFrameNum = NewFrameNum + 1;
         
+        if strcmp(Options.TopHatBackgroundSubtraction, 'y')
+        
+            CurrentFrameImage = Top_Hat_Background_Subtraction(CurrentFrameImage, Options);
+
+        end
+            
+       
         VideoMatrix(:,:,NewFrameNum) = CurrentFrameImage;
+  
                             
         % For each frame, the background intensity, average intensity, and 
         % integrated intensity are calculated. The threshold for each image 
@@ -174,6 +198,5 @@ function [ImageWidth,NumFramesActuallyAnalyzed,ImageHeight,BitDepth,VideoMatrix,
         end
   
     end
-    
     
  end

@@ -7,6 +7,7 @@ disp('   Howdy, partner. Lets get started, shall we?')
 disp('   First, choose the folder where you want to pick the data.')
 disp('   This should be the folder with the analyzed traces: output of Program B)...')
     DataLocation_UserReview = uigetdir();
+    
 
 
 disp('   Awesome. Sending that to the start program now...')

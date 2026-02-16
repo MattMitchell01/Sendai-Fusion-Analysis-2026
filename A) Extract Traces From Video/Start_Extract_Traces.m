@@ -32,6 +32,8 @@ function [] = Start_Extract_Traces(varargin)
 % http://dx.doi.org/10.1016/j.bpj.2016.05.048
 
 % Updated by Bob Rawle, Williams College, 2023 and 2024
+
+% Updated by Matthew D. Mitchell, Rawle Lab, Williams College (Jan 2026)
 % - - - - - - - - - - - - - - - - - - - - -
 
 disp('====================================')
@@ -58,7 +60,12 @@ for i = 1:NumberOfFiles
 
         % Extract focus frame numbers, frame to find
         % the viruses, etc. from the corresponding text file if it is there
-            if strcmp(CurrentOptions.ExtractInputsFromTextFile,'y')
+            
+            if strcmp(CurrentOptions.ExtractAnalysisInputsFromConsole,'y')
+                [CurrentOptions] = Console_Extract_Analysis_Inputs(Options);
+                CurrentOptions
+            
+            elseif strcmp(CurrentOptions.ExtractInputsFromTextFile,'y')
                 CurrentAnalysisTextFilePath = strcat(DefaultPathname,Options.AnalysisTextFilename);
                 [CurrentOptions] = Extract_Analysis_Inputs(CurrentOptions,CurrentAnalysisTextFilePath);
                 CurrentOptions  

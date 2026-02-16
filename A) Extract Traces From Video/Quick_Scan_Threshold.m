@@ -6,7 +6,12 @@ BasicOptions = FileOptions(1).Parameter(1).Options;
     DefaultPathname = BasicOptions.DefaultPathname;
     VideoFilePath = strcat(DefaultPathname,VideoFileName);
 
-    [BasicOptions] = Extract_Analysis_Inputs(BasicOptions,strcat(DefaultPathname,BasicOptions.AnalysisTextFilename));
+    if strcmp(BasicOptions.ExtractAnalysisInputsFromConsole, 'y')
+        [BasicOptions] = Console_Extract_Analysis_Inputs(BasicOptions);
+    elseif strcmp(BasicOptions.ExtractInputsFromTextFile, 'y')
+        [BasicOptions] = Extract_Analysis_Inputs(BasicOptions,strcat(DefaultPathname,BasicOptions.AnalysisTextFilename));
+    end
+
 
     FrameRange = BasicOptions.FrameNumToFindParticles - BasicOptions.FindFramesToAverage:BasicOptions.FrameNumToFindParticles + BasicOptions.FindFramesToAverage;
     NumFrames = length(FrameRange);
@@ -24,10 +29,14 @@ if strcmp(BasicOptions.ExtractTimesFromMetaData, 'y')
         ImageWidth = str2double(metadata.get(strcat('Plane #00 Width'))); %in pixels
         ImageHeight = str2double(metadata.get(strcat('Plane #00 Height'))); %in pixels
         
-    else
+    elseif NumFramesInFullVideo < 1001
         BitDepth = str2double(metadata.get(strcat('Plane #000 BitDepth')));
         ImageWidth = str2double(metadata.get(strcat('Plane #000 Width'))); %in pixels
         ImageHeight = str2double(metadata.get(strcat('Plane #000 Height'))); %in pixels
+    else
+        BitDepth = str2double(metadata.get(strcat('Plane #0000 BitDepth')));
+        ImageWidth = str2double(metadata.get(strcat('Plane #0000 Width'))); %in pixels
+        ImageHeight = str2double(metadata.get(strcat('Plane #0000 Height'))); %in pixels
     end
 
         VideoMatrix = zeros(ImageHeight, ImageWidth, length(FrameRange), 'uint16');

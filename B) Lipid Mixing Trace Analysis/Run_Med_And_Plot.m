@@ -14,6 +14,11 @@ function [TraceRunMedian,FigureHandles] = ...
         TraceRunMedian.FrameNumbers = CurrTraceCropped.FrameNumbers(StartIdx:EndIdx);
         TraceRunMedian.TimeVector = CurrTraceCropped.TimeVector(StartIdx:EndIdx);
 
+%     for n = StartIdx:EndIdx
+%         TraceRunMedian.Trace(n-RunMedHalfLength) = median(CurrTraceCropped.Trace(n-RunMedHalfLength:n+RunMedHalfLength));
+%     end
+
+
     TraceLength = length(CurrTraceCropped.FrameNumbers);
     OldTrace = CurrTraceCropped.Trace;
     TraceRunMedian.Trace = zeros(size(CurrTraceCropped.FrameNumbers));

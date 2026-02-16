@@ -44,7 +44,13 @@ function [TraceGradData,DockingData] =...
         RangeToFilterPositive = Options.NumFramesBetweenGradientEvents;
         RangeToFilterNegative = Options.NumFramesBetweenGradientEvents;
         VirusStopbyIndex = find(TraceRunMedian.FrameNumbers==...
-            max(UniversalData.StandardBindFrameNum + 1,Options.FrameToStartAnalysis + Options.RunMedHalfLength));
+            max([UniversalData.StandardBindFrameNum + 1,Options.FrameToStartAnalysis + Options.RunMedHalfLength,...
+            min(TraceRunMedian.FrameNumbers)]));
+                %Added 250731 - added min(TraceRunMedian.FrameNumbers) to
+                %account for when we want the frame to start the analysis
+                %to be greater than 1. Currently it is hardcoded at 1. So
+                %we choose instead the first frame number in the running median of
+                %the trace.
             % This determines where we will start analyzing for fusion events
             if isempty(VirusStopbyIndex)
                 ErrorinCalculatingVirusStopbyIndex;
@@ -135,9 +141,15 @@ function [TraceGradData,DockingData] =...
         StartIdx = Options.FrameToStartAnalysis;
         EndIdx = length(TraceRunMedian.Trace);
 
+        TraceRunMedianWiderRange = zeros(length(StartIdx:EndIdx),1);
         %We also set up a vector with the actual frame numbers
         %corresponding to each index position.
         SpikeFrameNumbers = TraceRunMedian.FrameNumbers(StartIdx:EndIdx);
+
+%         for n = StartIdx:EndIdx
+%             TraceRunMedianWiderRange(n-RunMedHalfLength) = median(TraceRunMedian.Trace(n-RunMedHalfLength:n+RunMedHalfLength));
+%         end
+
         
         TraceLength = length(TraceRunMedian.FrameNumbers);
         OldTrace = TraceRunMedian.Trace;

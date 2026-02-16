@@ -48,7 +48,7 @@ AreaForROI = max([PropsOfCurrParticle.Area, (Options.MinROISize)^2]);
         end
     end
     
-SizeOfSquareAroundCurrParticle = (sqrt(AreaForROI)*2);
+SizeOfSquareAroundCurrParticle = (sqrt(AreaForROI));  % was formerly (sqrt(AreaForROI)*2)
 SaturationTest = length(find(2^DataBits - CurrParticlePixelValues <= 1));
     %The SaturationTest will be non-zero if any of the pixels are
     %saturated.

@@ -1,0 +1,64 @@
+LOG OF UPDATES TO THE FUSION SCRIPTS MADE MY MATT (JANUARY 2026)
+
+=======================
+	PART A 
+=======================
+
+(1) New Method to Determine XY Sample-Wide Offset --> Fast Fourier Transform (FFT)
+UPDATE TYPE: Method Change
+WHY: FFT provides a more accurate and precise way to measure sample-wide pixel offsets across the timelapse. Single-particle tracking (SPT) is inherently noisier because centroid positions are highly sensitive to local intensity fluctuations, shape changes, and background variation, whereas FFT leverages information from an entire image region. In addition, SPT fails when the tracked particle is lost, forcing a restart - which us students never like.
+NEW CODE: Find_And_Analyze_Particles ln 45-94  Fast_Fourier_Transform.m (New Fn)  Single_Particle_Tracking.m (Fn rename) 
+
+(2) Shrinking ROIs to better match virus size
+UPDATE TYPE: Method Change
+WHY: The original ROIs were significantly larger than the viruses themselves (e.g., a 9×9 ROI for a 4-pixel virus). The ROI sizing was modified so that the side length of the box is determined by SQRT(AreaForROI) rather than SQRT(2 × AreaForROI) as before. This change produces tighter ROIs that scale more appropriately with virus size, improves the signal-to-noise ratio of the extracted traces, and yields summation values that are more realistic. After background subtraction, some noise remains; this appears to arise from inherent frame-to-frame intensity fluctuations of the virus pixels which was evident from inspection using 3D surface plots.
+CHANGED CODE: Simplified_Test_Goodness, line 51
+
+(3) New Method for Extracting TIFF Metadata
+UPDATE TYPE: Method Change
+WHY: The data{1,2} metadata previously used to extract TIFF information is specialized and poorly supported, making it difficult to extract information from. The data{1,4} metadata contains standardized OME metadata, which is widely supported and accessible through existing MATLAB functions. Using this metadata, we now extract image width, image height, bit depth, number of frames, and frame timing information. Additionally, focus indices are now determined directly from changes in the Z-position from this metadata. This approach integrates cleanly with the workflow changes described in Update (4). 
+NEW CODE: Create_Video_Matrix_Auto_Time_Vector ln 13-84
+
+(4) Analysis Inputs Entered via the Console (Not a .txt File)
+UPDATE TYPE: Quality of Life (QOL)
+WHY: Manually editing and reusing an input text file for each analysis was unnecessary and inefficient. Analysis parameters are now entered directly through console prompts, allowing users to input the time-zero frame, finding image frame, start analysis frame, and a list of frames to ignore. Notice: if a user still wants to use the analysis_inputs.txt file they should leave foc as 'Nan' as the focus events will be pulled from the metadata and the user will be asked to confirm them at that time.
+NEW CODE: Console_Extract_Analysis_Inputs.m (New Fn)  Setup_Options_Extract_Traces ln 82 (Options.ExtractAnalysisInputsFromConsole)  Quick_Scan_Threshold ln 9-13
+CHANGED CODE: Start_Extract_Traces ln 64-68
+
+
+=======================
+	PART B 
+=======================
+
+
+
+
+=======================
+	PART C 
+=======================
+
+(1) User enters correction codes into the CONSOLE instead of the Matlab modal dialog box
+UPDATE TYPE: QOL
+WHY: dialog box would cause Matlab to crash and once the dialog box appeared the user could not resize figures, interact with any other applications, etc
+NEW CODE: Start_User_Review.m ln 113-156  FixWaitTime.m ln 75-89
+
+
+
+
+==============================
+  Notes & Important Findings 
+==============================
+
+(1) DETERMING FRAME-TO-FRAME XY Drift
+VERDICT = New Method: The Fast Fourier Transform (FFT)
+--> As described above FFT is a superior method to Single Particle Tracking to determine the XY offset of the sample across frames of the timelapse.
+
+(2) BACKGROUND SUBTRACTION
+VERDICT = probably just keep using RoughBackground
+--> The RoughBackground subtraction method is mean(median(FrameImage)) aka taking the median intensity value of each column of the 2D image matrix and then taking the mean of that vector. This method works much better and produces much less variation than I initially thought. Plotting the values of the RoughBackground vector multiplied by 25 (the new average ROI size after making the adjustment to shrink the ROI's) results in frame to frame variation of 2-10 intensity units per ROI. Given a standard particle seems to have summed intensity values between 0-1000 this variation is so small it is not contributing significant error and does not need to be fixed.
+
+--> Top Hat Background Subtraction: Uses a disk element to subtract slow, uneven background from the image. This preserves small bright features while removing large-scale background variations within an image. This method is sensitive to the size (radius) of the disk element which must be larger than the regions you are attempting to isolate as to now remove them. This method is ineffective at correcting for frame-to-frame changes in background/total_intensity. Using Top Hat subtraction to correct for in-frame changes in background followed by RoughBackground subtraction resulted in frame to frame variation of < 5 intensity units per ROI (following the same *25 scaled method as above)
+
+(3) SIZE OF VIRUS ROI
+VERDICT = Shrink the ROIs
+--> Previously, nearly all ROIs were 9×9 (81 pixels). After the adjustments described above, most ROIs are now 5×5, while larger viruses retain larger ROIs (e.g., 9×9). It appears that 5×5 is the minimum ROI size produced by the current approach. Although smaller viruses may contain only 4–8 pixels, MATLAB’s bwconncomp and regionprops effectively impose a minimum area of ~25 pixels. Further modifications could be made to the code in Simplified_Test_Goodness to allow ROIs to shrink below this limit.

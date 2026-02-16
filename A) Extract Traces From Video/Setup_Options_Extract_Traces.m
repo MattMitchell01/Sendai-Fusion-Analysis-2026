@@ -1,8 +1,9 @@
 function [Options] = Setup_Options_Extract_Traces()
 
 % ==============Options you'll probably change regularly==================
+          
     Options.ScanParameters = 'n';
-    Options.ScanRange = [60,100];
+    Options.ScanRange = [100, 300];
         % y or n. Choose y if you are going to be extracting traces from 
         % the same file with different parameters. 
         % If so, you should make sure that everything is set up correctly 
@@ -11,7 +12,7 @@ function [Options] = Setup_Options_Extract_Traces()
         % program will show you the output of the threshold range you chose
         % and then terminate.
         
-    Options.Threshold = 80;
+    Options.Threshold = 300; %Rem: Should not change much but dye [ ] in virus can be very different even for == samples
         % This is the number of counts above background which will be used
         % to detect virus particles. You will need to optimize this number 
         % for each set of imaging conditions and/or each data set. An optimal 
@@ -24,14 +25,14 @@ function [Options] = Setup_Options_Extract_Traces()
         % conditions are used, you shouldn't need to change the threshold 
         % value much if at all between data sets.
 
-    Options.ExtraLabel =  strcat('_ExtractedTraces, th = ', num2str(Options.Threshold));
+    Options.ExtraLabel =  strcat('_ExtractedTracestest, th = ', num2str(Options.Threshold));
         % This extra label will be added on to the end of the resulting filename 
         % for the output .mat file. Leave blank if you don't want anything added on.
 
     % ---------Image Visualization Options---------
     
-    Options.MinImageShow = 350; % Normal = 350
-    Options.MaxImageShow = 600; % Normal = 600
+    Options.MinImageShow = 400; % Normal = 350
+    Options.MaxImageShow = 800; % Normal = 600/1600
         % These determine the minimum and maximum intensity counts that will 
         % be used to set the contrast for the grayscale images that are displayed.
         % The minimum value will be displayed as black and the maximum value 
@@ -40,14 +41,30 @@ function [Options] = Setup_Options_Extract_Traces()
 %================= Options You Might Change While Optimizing For a Particular Data Type (after consulting Bob) ================
         
         Options.DeterminePixelOffset = 'y';
-            % y or n. Choose y if you want to determine pixel offset over time.
+        % y or n. Do we need to account for XY Sample-Wide Drift
+
+            Options.FFTOffset = 'y';
+            % y or n. Uses Fast-Fourier-Transform to determine pixel offset over time.
+            
+                Options.FFTRegion = [0.30,0.70];    % Normal = [0.30,0.70] (Middle 40% of the image)
+
+
+            Options.SingleParticleTrackingOffset = 'n';
+            % y or n. Choose y if you want to determine pixel offset over time using single-particle tracking.
             % this will be done by selecting a stationary particle you wish to track and
             % then using that to determine the offset.  
             
-            Options.SearchRadius = 20; %in pixels
-            % Sets the maximum box size in which the particle will be tracked
+                Options.SearchRadius = 20;
+                % Sets the maximum box size in which the single particle will be tracked
+      
+
+        Options.TopHatBackgroundSubtraction = 'n';
+            Options.DiskRadius = 10;
+        % Top Hat background subtraction algorithm to remove the background
+        % Disk Radius = radius of the disk in pixels that will be used to
+        % determine 
     
-    % ---------Inputs specific to each data set---------
+    % ---------Inputs specific to each data set--------   
         Options.ExtractTimesFromMetaData = 'y';
             % y or n. Choose y if you want to automatically extract the time values from the metadata. This requires that
             % your data be in the OME.TIF format, and that you have the metadata.txt file. 
@@ -59,8 +76,13 @@ function [Options] = Setup_Options_Extract_Traces()
             % automatically. It excludes the first image(s) from the trace analysis, 
             % since it was only used as a time zero marker. Note that y only makes 
             % sense if you are extracting times from the metadata.    
-        
-        Options.ExtractInputsFromTextFile = 'y'; %Default is yes. Ask Bob if you think you should choose n
+
+        Options.ExtractAnalysisInputsFromConsole = 'y';
+            % y or n. Choose y if you want to enter the tzero, start, find,
+            % ignore frames in via the console.
+            % Otherwise you will have to use the .txt file
+
+        Options.ExtractInputsFromTextFile = 'n';
             % 'y' OR 'n'
             % Choose 'y' to automatically extract the following inputs from 
             % an associated text file: TimeZeroFrameNumber, StartAnalysisFrameNumber, FrameNumToFindParticles,

@@ -71,19 +71,17 @@ function [CorrectedAnalysisData] = FixWaitTime(CorrectedAnalysisData,UniversalDa
     
                 title(strcat("Bind to Fuse wait time = ", num2str(FusionData.BindtoFusionTime), " sec"))
 
-                Prompts = {'We all good here?'};
-                DefaultInputs = {'y'};
-                Heading = 'Type n if not';
-                UserAnswer = inputdlg(Prompts,Heading, 1, DefaultInputs, 'on');
-    
-                if strcmp(UserAnswer{1,1},'n')
+
+                % Ask user via console (y / n)
+                fprintf('We all good here? (y/n)\n');
+                s = strtrim(lower(input('> ', 's')));
+
+                if strcmp(s,'n')
                     disp('Lets try again then')
-                    
                     AskUserAgain = 'y';
-                    
                 else
-                    % It is good so we exit out
-                    AskUserAgain = 'n';
+                    % Default behavior: treat anything other than 'n' as yes
+                    AskUserAgain = 'n';   
 
                     % Change this flag so that the wait time will be
                     % included in CDF program.

@@ -18,7 +18,7 @@ function [CurrTrace,CurrTimeVector,VectorOfFrameNumbers] = Correct_Focus_And_Ign
 % program, and not necessarily in the original data set in FIJI or whatever
 
         VectorOfFrameNumbers = 1:length(CurrTrace);
-        
+
 % Ignore frame numbers are simply deleted from the trace, together with their 
 % corresponding values in the time vector
     if strcmp(UniversalData.IgnoreProblems,'y')

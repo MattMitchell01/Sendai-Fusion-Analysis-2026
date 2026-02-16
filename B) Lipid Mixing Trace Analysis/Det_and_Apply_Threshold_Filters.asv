@@ -44,7 +44,13 @@ function [TraceGradData,DockingData] =...
         RangeToFilterPositive = Options.NumFramesBetweenGradientEvents;
         RangeToFilterNegative = Options.NumFramesBetweenGradientEvents;
         VirusStopbyIndex = find(TraceRunMedian.FrameNumbers==...
-            max(UniversalData.StandardBindFrameNum + 1,Options.FrameToStartAnalysis + Options.RunMedHalfLength));
+            max([UniversalData.StandardBindFrameNum + 1,Options.FrameToStartAnalysis + Options.RunMedHalfLength,...
+            min(TraceRunMedian.FrameNumbers)]));
+                %Added 250731 - added min(TraceRunMedian.FrameNumbers) to
+                %account for when we want the frame to start the analysis
+                %to be greater than 1
+                %StandardBindFrameNum is less than 1 (in shifted frame
+                %numbers)
             % This determines where we will start analyzing for fusion events
             if isempty(VirusStopbyIndex)
                 ErrorinCalculatingVirusStopbyIndex;
@@ -133,7 +139,7 @@ function [TraceGradData,DockingData] =...
 %         EndIdx = length(TraceRunMedian.Trace)-RunMedHalfLength;
 
         StartIdx = Options.FrameToStartAnalysis;
-        EndIdx = length(CurrTraceCropped.Trace);
+        EndIdx = length(TraceRunMedian.Trace);
 
         TraceRunMedianWiderRange = zeros(length(StartIdx:EndIdx),1);
         %We also set up a vector with the actual frame numbers
@@ -145,22 +151,22 @@ function [TraceGradData,DockingData] =...
 %         end
 
         
-        TraceLength = length(CurrTraceCropped.FrameNumbers);
-        OldTrace = CurrTraceCropped.Trace;
-        TraceRunMedian.Trace = zeros(size(CurrTraceCropped.FrameNumbers));
+        TraceLength = length(TraceRunMedian.FrameNumbers);
+        OldTrace = TraceRunMedian.Trace;
+        TraceRunMedianWiderRange = zeros(size(TraceRunMedian.FrameNumbers));
     
         for n = 1:TraceLength
             if n - RunMedHalfLength < 1
-                TraceRunMedian.Trace(n) = median(OldTrace(1:n+RunMedHalfLength));
+                TraceRunMedianWiderRange(n) = median(OldTrace(1:n+RunMedHalfLength));
             elseif n + RunMedHalfLength > TraceLength
-                TraceRunMedian.Trace(n) = median(OldTrace(n-RunMedHalfLength:end));
+                TraceRunMedianWiderRange(n) = median(OldTrace(n-RunMedHalfLength:end));
             else
-                TraceRunMedian.Trace(n) = median(OldTrace(n-RunMedHalfLength:n+RunMedHalfLength));
+                TraceRunMedianWiderRange(n) = median(OldTrace(n-RunMedHalfLength:n+RunMedHalfLength));
             end
             
         end
 
-        SpikeTrace = TraceRunMedian.Trace(StartIdx:EndIdx) - TraceRunMedianWiderRange; 
+        SpikeTrace = TraceRunMedian.Trace - TraceRunMedianWiderRange; 
         STDFilterFactorSpike = Options.SpikeThreshold;
         SpikeFilter = STDFilterFactorSpike* std(SpikeTrace(VirusStopbyIndex:end));
         FilteredSpikeTrace = SpikeTrace > SpikeFilter;

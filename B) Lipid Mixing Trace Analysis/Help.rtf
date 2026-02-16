@@ -1,0 +1,56 @@
+{\rtf1\ansi\ansicpg1252\cocoartf2709
+\cocoatextscaling0\cocoaplatform0{\fonttbl\f0\fswiss\fcharset0 ArialMT;\f1\fswiss\fcharset0 Helvetica;}
+{\colortbl;\red255\green255\blue255;\red0\green0\blue0;}
+{\*\expandedcolortbl;;\cssrgb\c0\c0\c0;}
+\margl1440\margr1440\vieww16900\viewh12340\viewkind0
+\deftab720
+\pard\pardeftab720\partightenfactor0
+
+\f0\fs20 \cf0 \ul \ulc0 -
+\fs24 Lipid Mixing Trace Analysis\ulnone \
+\
+By Bob Rawle, Kasson Lab, University of Virginia, 2016\
+Published online in conjunction with:\
+Rawle et al., Disentangling Viral Membrane Fusion from Receptor Binding Using Synthetic DNA-Lipid Conjugates, Biophysical Journal (2016) \
+http://dx.doi.org/10.1016/j.bpj.2016.05.048\
+\
+\pard\pardeftab720\partightenfactor0
+\cf2 \expnd0\expndtw0\kerning0
+Updates by:
+\f1 \
+
+\f0 Bob Rawle, Williams College 2024
+\f1 \
+
+\f0 Notes: Updates to make things flow easier. Prompts for user. Easy start script. Etc.
+\f1 \
+
+\f0 \'a0
+\f1 \
+\pard\pardeftab720\qj\partightenfactor0
+
+\f0 \cf2 To begin:
+\f1 \
+
+\f0 To start the program, run the function Start_Trace_Analysis.
+\f1 \
+
+\f0 \'a0\'a0\'a0\'a0\'a0\'a0\'a0\'a0 **Can also use the An_Easy_Start_\'85 script as well
+\f1 \
+
+\f0 Before starting the program, the options should be specified in Setup_Options_Trace_Analysis.\cf0 \
+\pard\tx560\tx1120\tx1680\tx2240\tx2800\tx3360\tx3920\tx4480\tx5040\tx5600\tx6160\tx6720\pardeftab720\qj\partightenfactor0
+\cf0 \
+Basic description:\
+This program takes the .mat output file from the Extract Traces From Video which contains all of the intensity traces for each viral particle in the video. It analyzes each intensity trace using three different tests (described below) and determines whether it is 1) a lipid mixing event 2) no event 3) something else. The categorization of each trace is then saved, together with appropriate data such as the waiting time between pH drop and the lipid mixing event. This information, together with the trace, is also displayed in the trace figure window. The other windows show the gradient of the trace as well as other metrics which are used to determine whether a lipid mixing event has occurred. After the analysis is complete, a summary of the analysis will be printed to the command prompt window.\
+\
+The output of this program is a .mat file which can be used as input for your own custom built script to visualize the data (i.e. create a histogram of wait times, determine the efficiency of lipid mixing, etc.). All of the variables in the workspace are saved to this output file. The most relevant data (wait times, trace designations, etc.) will be found in the DataToSave structure.\
+\
+Tests used to identify fusion (lipid mixing) events:\
+	1) Gradient test. This is the basic test. A gradient is calculated for the intensity trace (more accurately, a running median of the intensity trace), and values which fall above the specified threshold are identified as potential fusion events. This test is good at identifying "fast fusion events", where the intensity changes abruptly. The gradient trace (and threshold) is shown in the Figure 23 window.\
+	2) Difference test. In this test, we are looking for fusion events (increases in intensity) that aren't quite as sharp as those detected by the gradient test. In some cases, these may be A) events that occur over just a few frames (i.e. "fast" fusion events) in which case they are lumped in with the events detected by the gradient test, or B) events that occur over many frames (i.e. "slow" fusion events) in which case they are separated into their own special category of events. This test is performed by calculating a "difference trace", in which the intensity value at each time point is subtracted by the value at a previous time point. The distance between time points is specified by the user in the options. Adjacent time points in the difference trace which fall above the specified threshold are called "clusters", and are potential fusion events. Clusters which are of short duration (value specified by the user in the options) are identified as fast fusion events. Those of longer duration are identified as slow fusion events. The difference trace (and thresholds) are shown in the Figure 24 window.\
+	3) Spike test. In this test, we are looking for transient spikes in the fluorescence intensity (in the case of fusion to tethered vesicles, this is mostly to weed out spurious events which passed the gradient test, but which are actually unbound/dislodged viruses which fly by and create a transient fluorescent spike). This test is performed by calculating a "spike trace" \'96 calculated as the intensity trace subtracted from a running median of the intensity trace. Values in the spike trace which are above the specified threshold are considered "spike events". Spike events which occur close to a potential fusion event identified by the gradient test are used to classify that potential fusion event as a false event (i.e. the gradient test just picked up a transient spike). The spike trace (and threshold) are shown in the Figure 24 window, together with the difference trace.\
+\
+Helpful note: You will need to determine the options settings (especially the Analysis Parameters) in Setup_Options.m that work best for your data. To do this properly, you should watch the program analyze your data and make sure that it is correctly identifying fusion events. Once you have determined a set of parameters that works for your data, it should be reliable between data sets (and indeed you should keep them the same so as to not create a systematic bias).\
+\
+For additional details, see the notes throughout the program scripts.}
