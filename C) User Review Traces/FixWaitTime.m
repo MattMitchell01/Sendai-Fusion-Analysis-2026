@@ -5,6 +5,7 @@ function [CorrectedAnalysisData] = FixWaitTime(CorrectedAnalysisData,UniversalDa
             CurrTrace = CorrectedAnalysisData(TraceNumberIndex).Trace_BackSub;
             CurrTimeVector = CorrectedAnalysisData(TraceNumberIndex).TimeVector;
             BindFrameNum = UniversalData.StandardBindFrameNum;
+            FocusEvents = UniversalData.FocusFrameNumbers;
 
             %Correct focus and ignore frames for the current trace
             [CurrTrace_Corrected,CurrTimeVector_Corrected,CurrFrameNums_Corrected] = Correct_Focus_And_Ignore_Problems(CurrTrace,CurrTimeVector,UniversalData);
@@ -12,6 +13,12 @@ function [CorrectedAnalysisData] = FixWaitTime(CorrectedAnalysisData,UniversalDa
             if strcmp(Options.UseRunMed,"y")
                 [CurrTrace_Corrected] = Run_Med(CurrTrace_Corrected,Options);
             end
+
+            % 260227 Matt = Set the first Index to NaN and set the Focus Index Frames to NaN
+            CurrTrace_Corrected(1) = NaN;       
+            CurrTrace_Corrected(FocusEvents) = NaN;
+
+
 
             %Set up while loop to determine new wait time. Ask user if it
             %looks good. If not, choose again.

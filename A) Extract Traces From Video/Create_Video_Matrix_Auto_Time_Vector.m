@@ -68,22 +68,40 @@ function [ImageWidth,NumFramesActuallyAnalyzed,ImageHeight,BitDepth,VideoMatrix,
     
     % User will now check Focus Indices
     disp('Detected Focus Indices:');
-    disp(FocusIndices);
+    fprintf('%d ', FocusIndices)
+    fprintf('\n')
     
     while true
-        resp = input('Do you approve of these focus indices? (y/n): ', 's');
-    
+
+        removeStr = input(['Enter focus indices to REMOVE ' ...
+            '(comma or space separated). Press Enter if none: '], 's');
+
+        if ~isempty(removeStr)
+            % Convert comma or space separated string into numeric vector
+            removeStr = strrep(removeStr, ',', ' ');
+            RemoveIndices = str2num(removeStr); %#ok<ST2NM>
+
+            % Remove user-specified indices
+            FocusIndices = setdiff(FocusIndices, RemoveIndices);
+        end
+
+        fprintf('\nUpdated Focus Indices:\n')
+        fprintf('%d ', FocusIndices)
+        fprintf('\n\n')
+
+        resp = input('Approve updated focus indices? (y/n): ', 's');
+
         if strcmpi(resp, 'y')
-            disp('Great — moving on!');
-            fprintf('\n')
+            disp('Great — moving on!')
             fprintf('\n')
             break
         elseif strcmpi(resp, 'n')
-            disp('READ READ READ --> Then you will have to find the focus indices yourself and use the input .txt file.');
-            error('Execution stopped by user.');
+            disp('Okay — modify again.')
+            fprintf('\n')
         else
-            disp('Invalid input. Please enter y or n.');
+            disp('Invalid input. Please enter y or n.')
         end
+
     end
 
 

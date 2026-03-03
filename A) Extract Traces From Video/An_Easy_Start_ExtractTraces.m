@@ -6,15 +6,15 @@
     disp('====================================')
     disp('   Hey there friend. Lets get started, shall we?')
     disp('   First, choose the folder where you want to pick the data...')
-        DataLocation = uigetdir();
-        %DataLocation = '';
+        %DataLocation = uigetdir();
+        DataLocation = '/Users/littlem/-Code-/Lab Data';
 
     
             
     disp('   Okay, now choose the directory where data folder will be saved...')
     disp('   This will probably be the parent save folder called: RBC analysis data')
-        ParentSaveFolderLocation = uigetdir();
-        %ParentSaveFolderLocation = '';
+        %ParentSaveFolderLocation = uigetdir();
+        ParentSaveFolderLocation = '/Users/littlem/-Code-/Lab Analysis';
 
 disp('   Awesome. Sending that to the start program now...')
 % If you have already chosen the data and save locations you can simply copy and paste the

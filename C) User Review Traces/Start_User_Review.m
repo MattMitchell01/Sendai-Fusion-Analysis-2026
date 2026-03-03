@@ -36,7 +36,7 @@ close all
     
 % Define variables we will need
     CorrectedAnalysisData = PreviousAnalysisData;
-    NumTracesToReview = NumTraces - Options.StartingTraceNumber - 1;
+    NumTracesToReview = NumTraces - Options.StartingTraceNumber + 1;
     NumReviewRounds = ceil(NumTracesToReview/Options.TotalNumPlots);
     TraceCounter = Options.StartingTraceNumber;
     ErrorCounter = 0;
@@ -131,6 +131,10 @@ close all
             
                 % Quit
                 if strcmpi(s, 'q')
+                    FirstPlotTraceNumber = CurrentTraceRange(1);
+                    FirstPlotVirusNumber = PreviousAnalysisData(FirstPlotTraceNumber).VirusIDNumber;
+                    fprintf('   First plot when quitting -> Trace #%d | Virus ID #%d\n', ...
+                        FirstPlotTraceNumber, FirstPlotVirusNumber);
                     disp('   You Chose To Quit')
                     disp('   Program terminated.')
                     disp('====================================')

@@ -3,7 +3,7 @@ function [Options] = Setup_Options_Extract_Traces()
 % ==============Options you'll probably change regularly==================
           
     Options.ScanParameters = 'n';
-    Options.ScanRange = [100, 300];
+    Options.ScanRange = [40, 100];
         % y or n. Choose y if you are going to be extracting traces from 
         % the same file with different parameters. 
         % If so, you should make sure that everything is set up correctly 
@@ -12,7 +12,7 @@ function [Options] = Setup_Options_Extract_Traces()
         % program will show you the output of the threshold range you chose
         % and then terminate.
         
-    Options.Threshold = 300; %Rem: Should not change much but dye [ ] in virus can be very different even for == samples
+    Options.Threshold = 100; %Rem: Should not change much but dye [ ] in virus can be very different even for == samples
         % This is the number of counts above background which will be used
         % to detect virus particles. You will need to optimize this number 
         % for each set of imaging conditions and/or each data set. An optimal 

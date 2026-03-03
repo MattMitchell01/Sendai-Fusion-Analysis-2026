@@ -23,6 +23,7 @@ function [AnalyzedTraceData,OtherDataToSave,StatsOfFailures,StatsOfDesignations]
     %Collect the frame numbers and time in which binding occurred, when focusing issues
     %happened, and when all of the virus particles stopped moving. Some/all of
     %these values may have been predefined before this point.
+    
     [FrameAllVirusStoppedBy,StandardBindTime,FocusFrameNumbers,IgnoreFrameNumbers,focusproblems,ignoreproblems] =...
         Determine_BindTime_Focus_Stop_FrameNumbers(OtherImportedData,InputTraceData,Options);
 
@@ -85,14 +86,14 @@ function [AnalyzedTraceData,OtherDataToSave,StatsOfFailures,StatsOfDesignations]
                     Options.FrametoEndAnalysis = length(CurrTrace);
                 end
 
-                % Correct focus problems
+
+               
                 [CurrTrace,CurrTimeVector,CurrFrameNumbers] = Correct_Focus_Ignore_Problems(CurrTrace,CurrTimeVector,UniversalData);
 
                 CurrTraceCropped.Trace = CurrTrace; %CurrTrace(Options.FrameToStartAnalysis:Options.FrametoEndAnalysis);
                 CurrTraceCropped.TimeVector = CurrTimeVector; %CurrTimeVector(Options.FrameToStartAnalysis:Options.FrametoEndAnalysis);
                 CurrTraceCropped.FrameNumbers = CurrFrameNumbers; %Options.FrameToStartAnalysis:length(CurrTraceCropped.Trace)+Options.FrameToStartAnalysis-1;
                 
-                % Calculate the running median of the trace (used for much of the analysis) and plot the trace
                 [TraceRunMedian,FigureHandles] = ...
                     Run_Med_And_Plot(CurrTraceCropped,FigureHandles,UniversalData,Options,CurrentVirusData);
                 

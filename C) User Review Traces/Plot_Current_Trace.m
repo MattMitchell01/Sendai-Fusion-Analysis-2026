@@ -5,10 +5,18 @@ FusionData = CurrentVirusData.FusionData;
 DockingData = CurrentVirusData.DockingData;
 TraceGradData = CurrentVirusData.TraceGradData;
 ChangedByUser = CurrentVirusData.ChangedByUser;
+FocusEvents = CurrentVirusData.FocusFrameNumbers_Shifted;
+
+% 260227 Matt = Set the first Index to NaN and set the Focus Index Frames to NaN
+CurrTrace_Corrected(1) = NaN;       
+CurrTrace_Corrected(FocusEvents) = NaN;
+
 
 % Plot the current trace to the current subplot axis
     set(0,'CurrentFigure',FigureHandles.MasterWindow)
-    set(FigureHandles.MasterWindow,'CurrentAxes',FigureHandles.SubHandles(PlotCounter));
+    NumSubHandles = length(FigureHandles.SubHandles);
+    PlotCounterToUse = min(PlotCounter, NumSubHandles);
+    set(FigureHandles.MasterWindow,'CurrentAxes',FigureHandles.SubHandles(PlotCounterToUse));
     cla
     
     hold on

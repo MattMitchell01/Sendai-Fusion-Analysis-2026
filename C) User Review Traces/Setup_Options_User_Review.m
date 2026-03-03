@@ -22,15 +22,15 @@ function [Options] = Setup_Options_User_Review()
     % -------Options you are less likely to change regularly-------
         Options.StartingTraceNumber = input("   Please enter starting trace number (1 is typical): ");
 
-        Options.NumPlotsX = 7;
-        Options.NumPlotsY = 4;
+        Options.NumPlotsX = 5;
+        Options.NumPlotsY = 3;
         Options.TotalNumPlots = Options.NumPlotsX*Options.NumPlotsY;
         Options.SaveAtEachStep = 'y';
         Options.QuickModeNoCorrection = 'n';
     
         Options.FixWaitTime = 'y'; %allow user to manually fix wait time when they choose 1 fuse.
 
-        Options.UseRunMed = 'y'; % show running median instead of raw trace
+        Options.UseRunMed = 'n'; % show running median instead of raw trace
         Options.RunMedHalfLength = 1; % num of data points on either side to include in running median
 
         Options.ShowBindFrame = 'n'; %Will draw a black dashed line

@@ -6,6 +6,14 @@ function [RerunThisRound, CorrectedAnalysisData, ErrorCounter] = Correct_Designa
 
     for j = 1:NumberIncorrect
         CurrentIndex = floor(IncorrectPlotIndices(j));
+        MaxRoundPlots = length(CurrentTraceRange);
+
+        if isnan(CurrentIndex) || CurrentIndex < 1 || CurrentIndex > MaxRoundPlots
+            fprintf('Invalid plot number %g for this round. Valid plot numbers are 1 to %d.\n', ...
+                IncorrectPlotIndices(j), MaxRoundPlots);
+            RerunThisRound = 'y';
+            break
+        end
 
         TraceNumberIndex = CurrentTraceRange(CurrentIndex);
 

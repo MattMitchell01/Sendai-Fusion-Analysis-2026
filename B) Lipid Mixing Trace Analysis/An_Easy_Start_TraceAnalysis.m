@@ -5,8 +5,8 @@ disp('====================================')
 disp('   Hey there friend. Lets get started, shall we?')
 disp('   First, choose the folder where you want to pick the data...')
 disp('   (This should be your extracted traces: the output of program A.)')
-    DataLocation_TraceAnalysis = uigetdir();
-    %DataLocation_TraceAnalysis = '';
+    %DataLocation_TraceAnalysis = uigetdir();
+    DataLocation_TraceAnalysis = '/Users/littlem/-Code-/Lab Analysis';
 
 
 disp('   Awesome. Sending that to the start program now...')

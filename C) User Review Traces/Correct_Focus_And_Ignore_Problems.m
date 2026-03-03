@@ -21,7 +21,7 @@ function [CurrTrace,CurrTimeVector,VectorOfFrameNumbers] = Correct_Focus_And_Ign
 
 % Ignore frame numbers are simply deleted from the trace, together with their 
 % corresponding values in the time vector
-    if strcmp(UniversalData.IgnoreProblems,'y')
+    if strcmp(UniversalData.IgnoreProblems,'n')
 
         for m=1:length(UniversalData.IgnoreFrameNumbers)
             CurrentIgnoreFrameNumber = UniversalData.IgnoreFrameNumbers(m);
@@ -36,7 +36,7 @@ function [CurrTrace,CurrTimeVector,VectorOfFrameNumbers] = Correct_Focus_And_Ign
 %Now we take care of the focus frame numbers (we do it after the ignore
 %frames so those don't get included in how we correct for focus frames.
 
-    if strcmp(UniversalData.FocusProblems,'y')
+    if strcmp(UniversalData.FocusProblems,'n')
             for m=1:length(UniversalData.FocusFrameNumbers)
                 currentfocusframenumber = UniversalData.FocusFrameNumbers(m);
                 currfocusindex = find(VectorOfFrameNumbers == currentfocusframenumber);
