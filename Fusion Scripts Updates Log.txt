@@ -1,0 +1,481 @@
+
+================================================================================
+                        FUSION SCRIPTS UPDATES LOG
+                  Rawle Lab  ·  Williams College  ·  Matthew D. Mitchell
+================================================================================
+
+
+
+
+================================================================================
+  JULY 2026
+================================================================================
+
+
+  This section covers the major June/July 2026 overhaul: a complete rewrite of the
+  Part B classifier and the Part C review tool, an entirely new Part R for reprocessing
+  old datasets, a new dead-time check in Part D, updates to Part A, changes to what data 
+  is stored across the pipeline and how we store it
+  (Earlier Part A work is logged under June/February 2026.)
+
+
+  PART A — Extract Traces From Video
+  ─────────────────────────────────────────────────────────────────────────────
+
+  (1)  FFT XY-Drift Correction Gets an Ordered List of Backup Regions
+       TYPE:   Method Change / Robustness
+       WHY:    A single fixed ROI for the FFT cross-correlation (see February 2026,
+               Part A, item 1) can fail on some videos -- e.g. if that region happens
+               to sit over an area of the image where there is a disturbance. 
+               Fast_Fourier_Transform is now tried against an ORDERED list of regions
+               (Options.FFTRegionList): the middle 40% of the frame first, then all
+               four corners as backups. After each region's XY-shift graph is plotted,
+               the user approves or rejects it; on rejection, the next region in the
+               list is tried automatically. Only once every region has been rejected
+               does the program fall back to Single_Particle_Tracking (manual click,
+               re-tried until approved). This makes the FFT method self-recovering
+               instead of a single-shot pass/fail.
+       FILES:  Setup_Options_Extract_Traces.m   (Options.FFTRegionList: 5 regions)
+               Find_And_Analyze_Particles.m     (per-region try/approve loop)
+               Fast_Fourier_Transform.m         (takes a Region argument)
+
+  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─
+
+  (2)  Output Struct Fields Finalized and Fully Documented
+       TYPE:   Method Change / Documentation
+       WHY:    VirusDataToSave (per-virus) and OtherDataToSave (per-video) are the
+               contract every downstream part relies on, so their fields were locked
+               down to an exact, ordered, documented list rather than growing ad hoc.
+               OtherDataToSave field names now consistently use a "Global" prefix
+               (GlobalTimeZeroFrame, GlobalFindingImageFrame, GlobalStartAnalysisFrame,
+               GlobalFocusFrameNumbers) to make clear these are raw/global video frame
+               numbers, not the clipped, trace-local indices Part B works in -- see
+               Part B's frame-indexing notes for that distinction. XYOffsets (the FFT/
+               SPT drift-correction result) is no longer stored on Options at all; it
+               is its own top-level OtherDataToSave field ([] if drift correction was
+               off for that run). The full, exact field order for both structs is
+               written up in A) Notes.txt and the Part A design notes.
+       FILES:  Find_And_Analyze_Particles.m   (OtherDataToSave/VirusDataToSave assembly)
+
+  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─
+
+  (3)  Analysis Inputs Narrowed to Exactly Tzero / Find / Start, With Console Echo
+       TYPE:   Method Change / Quality of Life
+       WHY:    Focus frame numbers are now ALWAYS auto-detected from the OME-TIFF
+               Z-position metadata (see February 2026, Part A, item 1) and always
+               override anything a text file could supply -- so analysis_inputs.txt
+               and TextFile_Extract_Analysis_Inputs.m no longer read, store, or
+               reference a 'foc' entry at all; the file now needs only tzero/find/
+               start (e.g. 'tzero 1, find 2, start 3'). To keep the text-file entry
+               point as easy to double-check as the console entry point, it now
+               echoes the three extracted values back to the console in the same
+               clear, numbered format Console_Extract_Analysis_Inputs.m uses, before
+               Start_Extract_Traces.m's existing "y to proceed" confirmation. A blank
+               value in that echo immediately flags a keyword that analysis_inputs.txt
+               was missing.
+       FILES:  TextFile_Extract_Analysis_Inputs.m
+               analysis_inputs.txt   ('foc ...' entry removed)
+
+  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─
+
+
+  PART B — Lipid Mixing Trace Analysis  (NEW CLASSIFIER — full rewrite)
+  ─────────────────────────────────────────────────────────────────────────────
+
+  (1)  Part B Rebuilt Around Explicit Fusion/Unbound Scoring
+       TYPE:   Method Change / Full Rewrite
+       WHY:    Bob's original Start_Trace_Analysis / Analyze_Current_Data_Set used
+               gradient-cluster heuristics that were hard to reason about and tune.
+               The new pipeline scores every frame of a trace with two transparent,
+               independently-tunable detectors and assigns a designation from their
+               cluster counts. Each detector is a set of binary tests (bits) so a
+               near-miss is legible: the score itself tells you which test failed.
+                 · Seek_Unbounds  — 4 backward-looking tests, score 15 = unbound frame
+                 · Seek_Fusion    — 5 forward-looking tests, score 31 = fusion frame
+               Find_Fusion_Frame / Find_Unbound_Frame then localize the exact event
+               frame with a step-function fit. Classify_Trace turns cluster counts into
+               '1 Fuse' / '2 Fuse' / 'Unbound' / 'No Fusion' / 'Other'.
+       FILES:  Analyze_Trace_Data.m            (new core pipeline)
+               Seek_Fusion.m / Parameters_Seek_Fusion.m
+               Seek_Unbounds.m / Parameters_Seek_Unbounds.m
+               Find_Fusion_Frame.m / Find_Unbound_Frame.m
+               Classify_Trace.m
+               Calculate_Sliding_Window.m
+               Setup_Options.m
+               Start_Trace_Analysis.m          (adapted entry point)
+
+  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─
+
+  (2)  Automatic Review Priority (Low / Medium / High, rules H1–H5)
+       TYPE:   New Feature
+       WHY:    So Part C can steer a reviewer to the traces that actually need eyes
+               instead of walking them in file order. Every trace is tagged Low,
+               Medium, or High; High traces additionally carry which rule fired
+               (H1 edge-proximity, H2a focus-veto near-miss, H2b focus-near-fusion,
+               H3 small-cluster, H4 one-test-failure near-miss, H5 'Other').
+       FILES:  Assign_Review_Priority.m / Parameters_Assign_Review_Priority.m
+               Analyze_Trace_Data.m
+
+  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─
+
+  (3)  Output Schema Reworked for Downstream Trust
+       TYPE:   Method Change
+       WHY:    The algorithm's original call is now FROZEN and physically separated
+               from reviewer-editable data: AlgoDesignation plus the full
+               SeekFusionData / SeekUnboundsData structs are never written by Part C,
+               while the live FusionData / UnboundData structs are. This lets Part B be
+               graded against what a reviewer actually found, even after corrections.
+               Redundant fields were removed (landing detection, TraceGradData, the
+               Algo*-prefixed duplicates, pHtoFusionTime, StandardBindFrameNum).
+               A new file-level EffectiveDeadTime (minutes) records the first frame
+               actually scored, and ClipWidth is a single shared dead-zone width.
+       FILES:  Analyze_Trace_Data.m
+               Display_All_Analyzed_Viruses.m  (adapted from Bob's; adds '2 Fuse' color)
+
+  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─
+
+  (4)  Frame-Indexing Convention Change Absorbed
+       TYPE:   Bug Fix / Method Change
+       WHY:    Part A now builds Trace_BackSub starting one frame AFTER the finding
+               image (StartAnalysisFrameNumber = FrameNumToFindParticles + 1). Part B
+               was updated so the finding image is no longer sliced off here (it is
+               already excluded upstream), and all global<->clipped frame conversions
+               and VideoTimeVector-based wait-time calculations were made consistent
+               with the new convention. Re-run Part B on any dataset you want this
+               reflected in — there is no shim reconciling old and new outputs.
+       FILES:  Analyze_Trace_Data.m
+
+  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─
+
+  (5)  Assessment Harness
+       TYPE:   New Tool (standalone)
+       WHY:    Score_Part_B compares a Part B output against a ground-truth key so the
+               classifier's accuracy can be measured as it is tuned.
+       FILES:  Score_Part_B.m
+
+
+  PART C — User Review Traces  (NEW REVIEW TOOL — full rewrite)
+  ─────────────────────────────────────────────────────────────────────────────
+
+  (1)  Priority-Sorted, Tiered Review Workflow
+       TYPE:   Method Change / Full Rewrite
+       WHY:    Rebuilt to work with the new Part B output. Traces are reviewed in
+               tiers — Low (one pool), Medium (by designation), then High (by rule
+               H1–H5) — each in its own grid layout, instead of strictly in file order.
+               High subgroups get situation-specific diagnostic overlays (H1 gets a
+               two-row full/zoom layout; H2a–H5 draw every focus event on the trace)
+               so the reviewer sees why the algorithm flagged the trace.
+       FILES:  Start_User_Review.m, Build_Review_Queue.m, Resolve_Grid_Config.m,
+               Setup_Options_User_Review.m, Create_Master_Window.m,
+               Plot_Current_Trace.m, Plot_Trace_Pair_H1.m,
+               Plot_Trace_With_Focus_Markers.m, Plot_Focus_Dot_Markers.m,
+               Get_H2_Focus_Jump_Trigger_Frame.m, Get_H4_Failed_Test_Label.m
+
+  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─
+
+  (2)  Console Correction Codes + Click-to-Repick, With Provenance
+       TYPE:   Quality of Life / Method Change
+       WHY:    Corrections are entered as "PlotNumber.Code" pairs at the console (the
+               MATLAB modal dialog crashed and blocked other windows). Codes were
+               regularized so each re-pick code is just its fresh code's digit doubled
+               (.1->.11, .2->.22, .3->.33). Fusion AND unbind frames can be re-picked
+               by clicking; picked frames are stored in global coordinates and every
+               change stamps a ChangedByUser note. Fixed a bug where a 2-Fuse trace
+               only recorded the first fuse frame's timing; wait-time labels corrected
+               from "sec" to "min".
+       FILES:  Correct_Designations.m, Get_Designation_Code_Table.m,
+               Parse_Designation_Code.m, Apply_Designation_Code.m,
+               Fix_Fusion_Wait_Time.m, Fix_Unbind_Wait_Time.m, Clip_Trace_For_Review.m
+
+  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─
+
+  (3)  Cross-Session Ground-Truth Harvest + Performance Log
+       TYPE:   New Feature
+       WHY:    At the end of a session Part C can harvest key traces into a shared
+               Key_Traces_Collection.mat and update a cumulative TP/FN/FP tally in
+               Performance_Log.mat (both in the master analysis folder), so Part B's
+               accuracy can be tracked over time across many reviewed datasets.
+       FILES:  Extract_Future_Key_Traces.m, Cleanup_Key_Traces_Collection.m,
+               Update_Performance_Log.m, Print_Designation_Summary.m,
+               Display_Reviewed_Viruses.m, Save_User_Review_File.m,
+               Get_User_Review_File_Path.m
+
+  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─
+
+  (4)  Old Focus/Ignore Correction Removed
+       TYPE:   Code Cleanup
+       WHY:    Focus/ignore correction now happens inside Part B before scoring, so
+               Part C no longer needs it. Bob's Correct_Focus_And_Ignore_Problems.m was
+               deleted outright (confirmed not wanted), superseded by
+               Clip_Trace_For_Review.m. Bob's original Part C is preserved untouched in
+               "z. Reference C) User Review Traces/" for workflow reference only.
+       FILES:  Correct_Focus_And_Ignore_Problems.m  (deleted)
+
+
+  PART R — Review Old Data  (ENTIRELY NEW SECTION)
+  ─────────────────────────────────────────────────────────────────────────────
+
+  (1)  Reprocess Legacy Datasets Through the Current Pipeline
+       TYPE:   New Feature / New Section
+       WHY:    Old datasets analyzed and hand-reviewed under Bob's original pipeline are
+               a large, already-ground-truthed pool for grading the new Part B. Part R
+               reshapes legacy input into the format current Part B expects, runs the
+               UNMODIFIED Part B and Part C, and flags every trace where the new
+               algorithm disagrees with the old human review — so a reviewer only looks
+               at the disagreements, sorted into the normal Low/Medium/High + H1–H5
+               categories, with output that stays compatible with Part D.
+               The driver restructures each experiment folder once (Old Traces/ +
+               Old Analysis/ vs. new Traces/ + Analysis/) so old and new never mix, and
+               validates the legacy frame-indexing convention on every file before
+               converting. Part C gained two additive, default-off options
+               (ReviewOldDataMode, ReviewOldDataOnlyDifferences) to drive these sessions
+               without touching the live pipeline.
+       FILES:  Run_Part_R_Driver.m, Convert_Legacy_ProgramA_Output.m,
+               Flag_Legacy_Disagreements.m
+               Setup_Options_User_Review.m  (Part C — two new options)
+
+
+  PART D — Compile CDF and Plot
+  ─────────────────────────────────────────────────────────────────────────────
+
+  (1)  Effective Dead-Time Check
+       TYPE:   New Feature / Robustness
+       WHY:    Each Part B file now records its true effective dead time (real-world
+               time of the first frame actually scored). Part D compares the longest
+               effective dead time across the selected files against the DeadTime the
+               user set, and warns if the assumed dead time is too short — which would
+               mean some events treated as "after the dead time" had not yet been
+               measurable. Old-format files without the field are reported and skipped
+               rather than crashing.
+       FILES:  Report_Effective_Dead_Time.m  (new)
+               Start_Compile_CDF.m           (calls the check; MAT v7.3 saves)
+               Combine_Trace_Analysis_Data.m, Extract_Data.m  (carry the field through)
+               Correct_Trace_Analysis_Data.m (honors 'User Erased' designation)
+
+
+  DOCUMENTATION & ATTRIBUTION
+  ─────────────────────────────────────────────────────────────────────────────
+
+  (1)  Author Attribution Added Across New/Modified Scripts
+       TYPE:   Documentation
+       WHY:    Every newly written script now carries a header crediting Matthew D.
+               Mitchell (Rawle Lab, Williams College, 2026); substantially revised
+               scripts credit both Bob Rawle's original and Matthew's revisions; minor
+               config edits are noted as such. Bob's original attribution is preserved
+               where he wrote it. Third-party helpers (tight_subplot, mvdlg, barwitherr)
+               were left as-is.
+       FILES:  63 scripts across Parts A, B, C, D, E, R
+
+  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─
+
+  (2)  Developer Docs Verified + Human-Readable Notes Added
+       TYPE:   Documentation
+       WHY:    The per-section developer documentation was checked against the actual
+               code (call graph in Part A corrected for the console/text-file input
+               split; a stale Vis_Outputs.m reference in Part B corrected). A
+               plain-language "<Section>) Notes.txt" was added for every section
+               (A, C, D, E, R; B already had one) so lab members have a friendly
+               overview of each part.
+       FILES:  A) Notes.txt, C) Notes.txt, D) Notes.txt, E) Notes.txt, R) Notes.txt
+
+
+
+
+================================================================================
+  JUNE 2026
+================================================================================
+
+
+  PART A — Extract Traces From Video
+  ─────────────────────────────────────────────────────────────────────────────
+
+  (1)  Top Hat Background Subtraction Removed
+       TYPE:   Code Cleanup
+       WHY:    Top Hat subtraction was assessed and found to be ineffective at
+               correcting frame-to-frame changes in background intensity (see
+               Notes — February 2026). The feature was removed from the active
+               pipeline entirely to reduce complexity.
+       FILES:  Setup_Options_Extract_Traces.m           (options removed)
+               Create_Video_Matrix_Auto_Time_Vector.m   (call removed)
+               Top_Hat_Background_Subtraction.m         (moved to z.Archive/)
+
+  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─
+
+  (2)  Quick_Scan_Threshold Updated to OME-XML Metadata
+       TYPE:   Method Change / Bug Fix
+       WHY:    The script was still reading image dimensions and bit depth from
+               the legacy data{1,2} flat-key metadata, requiring fragile
+               zero-padded key strings (e.g. 'Plane #000 Width') that varied
+               with frame count. Updated to use data{1,4} OME-XML object with
+               standardised accessor functions, matching the approach used in
+               Create_Video_Matrix_Auto_Time_Vector.m.
+       FILES:  Quick_Scan_Threshold.m   ln 22–40
+
+  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─
+
+  (3)  Extract_Analysis_Inputs.m Renamed to TextFile_Extract_Analysis_Inputs.m
+       TYPE:   Code Clarity
+       WHY:    The original name did not distinguish the text-file version from
+               the console version (Console_Extract_Analysis_Inputs.m), making
+               it easy to confuse the two. The new name makes the distinction
+               immediate.
+       FILES:  Extract_Analysis_Inputs.m  -->  TextFile_Extract_Analysis_Inputs.m
+               Start_Extract_Traces.m   ln 70   (call updated)
+               Quick_Scan_Threshold.m   ln 12   (call updated)
+
+  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─
+
+  (4)  Console Analysis Inputs Now Remember Previous Values
+       TYPE:   Quality of Life (QOL)
+       WHY:    Users had to re-enter all four analysis inputs (tzero, find,
+               start, ignore) on every run, even when nothing had changed. The
+               function now saves these values to last_console_inputs.mat and
+               displays them on the next run, allowing the user to proceed with
+               a single keypress (y) or selectively change only the fields that
+               differ. The confirmation question was reworked so that y = proceed
+               and n = make changes, consistent with the rest of the pipeline.
+       FILES:  Console_Extract_Analysis_Inputs.m   (full rewrite)
+
+  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─
+
+  (5)  Metadata File Path Remembered Between Runs
+       TYPE:   Quality of Life (QOL)
+       WHY:    Running Quick_Scan_Threshold multiple times before committing to
+               a full analysis required re-selecting the same metadata file on
+               every program launch. Load_Video_Files.m now saves the selected
+               path to last_console_inputs.mat and offers to reuse it on the
+               next run. The analysis inputs and video path share the same .mat
+               file to keep things centralised.
+       FILES:  Load_Video_Files.m   (file selection block rewritten)
+
+  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─
+
+  (6)  Error Thrown When No Metadata File Is Selected
+       TYPE:   Robustness
+       WHY:    Previously, dismissing the file picker without making a selection
+               silently saved a blank/invalid path and allowed the program to
+               continue, producing confusing downstream errors. The program now
+               throws an explicit, descriptive error immediately.
+       FILES:  Load_Video_Files.m   ln ~48
+
+
+
+
+================================================================================
+  FEBRUARY 2026
+================================================================================
+
+
+  PART A — Extract Traces From Video
+  ─────────────────────────────────────────────────────────────────────────────
+
+  (1)  New Method to Determine XY Sample-Wide Offset — Fast Fourier Transform
+       TYPE:   Method Change
+       WHY:    FFT provides a more accurate and precise way to measure
+               sample-wide pixel offsets across the timelapse. Single-particle
+               tracking (SPT) is inherently noisier because centroid positions
+               are highly sensitive to local intensity fluctuations, shape
+               changes, and background variation, whereas FFT leverages
+               information from an entire image region. SPT also fails when the
+               tracked particle is lost, forcing a restart.
+       FILES:  Find_And_Analyze_Particles.m   ln 45–94
+               Fast_Fourier_Transform.m       (new function)
+               Single_Particle_Tracking.m     (renamed)
+
+  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─
+
+  (2)  Shrinking ROIs to Better Match Virus Size (for Synthetic Vesicle ppl)
+       TYPE:   Method Change
+       WHY:    The original ROIs were significantly larger than the viruses
+               themselves (e.g., a 9×9 ROI for a 4-pixel virus). ROI sizing was
+               modified so that the side length is determined by sqrt(AreaForROI)
+               rather than sqrt(2 × AreaForROI). This produces tighter ROIs that
+               scale more appropriately with virus size and improves the
+               signal-to-noise ratio of the extracted traces. Residual
+               frame-to-frame noise appears to arise from inherent intensity
+               fluctuations of the virus pixels themselves.
+CRITICAL NOTE: This change is NOT for Fusion to RBCs. Why? --> we observe virions 
+	       spinning in circles and moving ever so slightly on the RBC 
+	       tethered vesicle surface. The oversized ROIs actually solve this
+	       issue. 
+	FILES:  Simplified_Test_Goodness.m   ln 51
+
+  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─
+
+  (3)  New Method for Extracting TIFF Metadata
+       TYPE:   Method Change
+       WHY:    The data{1,2} metadata was specialised and poorly supported,
+               making extraction difficult. The data{1,4} OME metadata object
+               contains standardised fields accessible through existing MATLAB
+               functions. Image width, height, bit depth, frame count, frame
+               timing, and focus indices (derived from Z-position changes) are
+               now all extracted through this interface.
+       FILES:  Create_Video_Matrix_Auto_Time_Vector.m   ln 13–84
+
+  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─
+
+  (4)  Analysis Inputs Entered via the Console (Not a .txt File)
+       TYPE:   Quality of Life (QOL)
+       WHY:    Manually editing and reusing an input text file for each analysis
+               was unnecessary and inefficient. Parameters are now entered
+               directly through console prompts (tzero, find, start, ignore).
+               Note: users who still wish to use analysis_inputs.txt should
+               leave foc as 'NaN' — focus events are pulled from the OME
+               metadata and confirmed interactively.
+       FILES:  Console_Extract_Analysis_Inputs.m      (new function)
+               Setup_Options_Extract_Traces.m   ln 82
+               Quick_Scan_Threshold.m           ln 9–13
+               Start_Extract_Traces.m           ln 64–68
+
+
+  PART C — User Review Traces
+  ─────────────────────────────────────────────────────────────────────────────
+
+  (1)  User Enters Correction Codes via the Console
+       TYPE:   Quality of Life (QOL)
+       WHY:    The MATLAB modal dialog box caused MATLAB to crash and prevented
+               the user from resizing figures or interacting with any other
+               application while it was open. Correction codes are now entered
+               directly in the console.
+       FILES:  Start_User_Review.m   ln 113–156
+               FixWaitTime.m         ln 75–89
+
+
+
+
+================================================================================
+  NOTES & IMPORTANT FINDINGS
+================================================================================
+
+  (1)  Determining Frame-to-Frame XY Drift
+       VERDICT:  New Method — Fast Fourier Transform (FFT)
+
+       FFT is a superior method to single-particle tracking for determining the
+       XY offset of the sample across frames of the timelapse. See Part A
+       update (1), February 2026 for full details.
+
+  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─
+
+  (2)  Background Subtraction
+       VERDICT:  Keep using RoughBackground
+
+       The RoughBackground method — mean(median(FrameImage)) — works much
+       better than initially expected. Frame-to-frame variation scales to
+       2–10 intensity units per ROI, which is negligible relative to particle
+       intensity values of 0–10000. Top Hat subtraction was also tested (see
+       Part A update (1), June 2026) and found not to improve upon this.
+
+  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─
+
+  (3)  Size of Virus ROI
+       VERDICT:  Shrink the ROIs
+
+       Previously, nearly all ROIs were 9×9 (81 pixels). After the adjustments
+       in Part A update (2), most ROIs are now 5×5, while larger viruses retain
+       proportionally larger ROIs. It appears 5×5 is the minimum ROI produced
+       by the current approach — MATLAB's bwconncomp and regionprops effectively
+       impose a minimum area of ~25 pixels. Further modifications to
+       Simplified_Test_Goodness.m could allow ROIs to shrink below this limit.
+
+
+================================================================================

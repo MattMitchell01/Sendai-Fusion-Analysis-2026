@@ -1,0 +1,164 @@
+
+==========================================================================================
+                      EXTRACT TRACES FROM VIDEO  —  PIPELINE NOTES
+                   Rawle Lab  ·  Williams College  ·  Matthew D. Mitchell
+==========================================================================================
+
+  These notes are a plain-language overview of Part A for lab members. They
+  describe what Part A does, how to run it, and the pieces that were added or changed
+  in the 2026 overhaul. Original pipeline by Bob Rawle (Kasson Lab, UVA, 2016; Rawle
+  et al., Biophysical Journal 2016). New work in this folder by Matthew D. Mitchell,
+  Rawle Lab, Williams College, 2026.
+
+
+==========================================================================================
+  WHAT THIS PART DOES
+==========================================================================================
+
+  Part A is the FIRST stage of the five-part fusion-analysis pipeline
+  (A -> B -> C -> D -> E). It takes raw OME-TIFF microscopy image stacks of a fusion
+  experiment and turns them into per-virus intensity traces.
+
+  Output is a MATLAB workspace .mat file containing:
+     · VirusDataToSave    — one struct per detected virus (its intensity trace + info)
+     · OtherDataToSave     — file-level information shared by all viruses in the video
+
+  That .mat file is the input to Part B (the classifier).
+
+
+==========================================================================================
+  HOW TO RUN
+==========================================================================================
+
+  1. Open An_Easy_Start_ExtractTraces.m and set the data + save folder paths near the top.
+  2. Check Setup_Options_Extract_Traces.m FIRST — especially Options.Threshold, which is
+     the particle-detection threshold and must be re-tuned for every new dataset.
+  3. Run An_Easy_Start_ExtractTraces.m. The program is interactive: it opens a file
+     picker for the metadata file and asks you to confirm the options before it starts.
+
+  TIP: Use Quick_Scan_Threshold.m to trial-run a threshold on the finding image before
+  committing to a full analysis. It reuses the same metadata file and analysis inputs.
+
+
+==========================================================================================
+  HOW THE PROGRAM FLOWS (call order)
+==========================================================================================
+
+  An_Easy_Start_ExtractTraces
+    -> Start_Extract_Traces(DataLocation, SavePath)
+         -> Setup_Options_Extract_Traces()         returns the Options struct
+         -> Load_Video_Files()                       GUI picker; remembers last-used path
+         -> for each video file:
+              -> analysis inputs come from ONE of:
+                   Console_Extract_Analysis_Inputs()   (if entering inputs at the console)
+                   TextFile_Extract_Analysis_Inputs()  (if reading analysis_inputs.txt)
+              -> Find_And_Analyze_Particles()         the main workhorse
+                   -> Create_Video_Matrix_Auto_Time_Vector()  load frames, timestamps,
+                                                               and focus events from metadata
+                   -> Fast_Fourier_Transform()          measure sample XY drift (default)
+                   -> Single_Particle_Tracking()        drift fallback if FFT is rejected
+                   -> for each particle:
+                        Simplified_Test_Goodness()      size / shape checks
+                        (crop ROI + subtract background, one frame at a time)
+                   -> Display_All_Particles()
+
+
+==========================================================================================
+  ANALYSIS INPUTS (tzero / find / start)
+==========================================================================================
+
+  Every analysis needs four numbers. You can now enter them at the CONSOLE (the new
+  default) instead of maintaining an analysis_inputs.txt file for each dataset.
+
+     tzero   Frame used as time zero (when virus was added / pH was dropped)
+     find    Frame used as the "finding image" to detect particles
+     start   First frame included in trace analysis
+     foc     Frame numbers of focus events (or NaN — usually auto-detected from metadata)
+
+  The console version (Console_Extract_Analysis_Inputs.m) REMEMBERS the values you
+  entered last time and shows them back to you, so a repeat run is a single "y" keypress.
+  If you prefer the old text-file route, TextFile_Extract_Analysis_Inputs.m still reads
+  analysis_inputs.txt (this is the renamed Extract_Analysis_Inputs.m).
+
+  IMPORTANT: analysis_inputs.txt, if used, must sit in the SAME folder as the data.
+
+
+==========================================================================================
+  WHAT COMES OUT — VirusDataToSave (per virus)
+==========================================================================================
+
+     Trace_BackSub               background-subtracted intensity trace (Part B's main input)
+     Trace                       raw (non-subtracted) trace
+     FocusFrameNumbers_Shifted   focus frames, shifted into the trace's own index space
+     TimeVector                  time (in MINUTES) for the analyzed frames
+     BindingTime                 time the virus was added
+     Coordinates                 [x, y] centroid of the particle
+     IsVirusGood                 'y', 'n', or 'Ignore'
+
+  NOTE: VirusDataToSave is NOT pre-filtered — it still contains bad particles
+  (IsVirusGood = 'n'). Part B skips those.
+
+
+==========================================================================================
+  WHAT COMES OUT — OtherDataToSave (per video)
+==========================================================================================
+
+  File-level data saved once per video, in this order:
+
+     GlobalTimeZeroFrame, GlobalFindingImageFrame, GlobalStartAnalysisFrame,
+     FindingImage, GlobalFocusFrameNumbers, XYOffsets, ThresholdsUsed,
+     RoughBackground, TotalVideoIntensity, AverageVideoIntensity, VideoTimeVector, Options
+
+  Two of these matter a lot downstream:
+     · VideoTimeVector — the FULL raw video time vector in MILLISECONDS, indexed by true
+       (global) frame number. Part B uses this to compute wait times.
+     · FindingImage — the image particles were detected on; Part B draws its
+       "all analyzed viruses" map on top of it.
+
+
+==========================================================================================
+  WHAT'S NEW OR CHANGED IN 2026 (Matthew)
+==========================================================================================
+
+  · FFT drift correction (Fast_Fourier_Transform.m, new).  Sample-wide XY drift is now
+    measured by cross-correlating each frame against the finding image over an ROI,
+    instead of single-particle tracking. FFT uses a whole image region, so it is far
+    less noisy than tracking one particle (which drifts, changes shape, and can be lost).
+    Single_Particle_Tracking.m is kept as a manual fallback the program falls back to
+    only if you reject every FFT region.
+
+  · Console analysis inputs (Console_Extract_Analysis_Inputs.m, new).  Enter tzero/find/
+    start/ignore at the console; values are remembered between runs.
+
+  · Renamed Extract_Analysis_Inputs.m -> TextFile_Extract_Analysis_Inputs.m to clearly
+    separate the text-file input path from the new console path.
+
+  · OME-XML metadata reading.  Image width, height, bit depth, frame count, frame timing,
+    and focus events are now pulled from the standardized OME metadata object (data{1,4})
+    instead of the fragile legacy flat-key metadata (data{1,2}). Applies to
+    Create_Video_Matrix_Auto_Time_Vector.m and Quick_Scan_Threshold.m.
+
+  · Automatic focus-event detection.  Focus events are detected from the OME-TIFF
+    Z-position (definite-focus motor) metadata and override any manual foc entries.
+
+  · Tighter ROIs (Simplified_Test_Goodness.m).  ROI side length is now sqrt(AreaForROI)
+    rather than sqrt(2*AreaForROI), giving tighter boxes that match virus size and improve
+    signal-to-noise.  CRITICAL: this is NOT appropriate for fusion-to-RBC experiments,
+    where virions spin/wander on the tethered-vesicle surface and the larger ROIs are
+    needed to keep them boxed — see the Updates Log (February 2026).
+
+  · Top-Hat background subtraction was removed (found not to help; RoughBackground,
+    mean(median(FrameImage)), works well).  QOL: metadata file path and analysis inputs
+    are remembered between runs, and dismissing the file picker now throws a clear error
+    instead of silently continuing.
+
+
+==========================================================================================
+  THINGS THAT WILL BITE YOU IF YOU FORGET THEM
+==========================================================================================
+
+  · Options.Threshold must be tuned per dataset. Nothing else matters if detection is off.
+  · analysis_inputs.txt (if used) goes with the DATA, not the save folder.
+  · Reading times from metadata needs OME-TIFF format and the Bio-Formats toolbox (bfopen).
+
+==========================================================================================

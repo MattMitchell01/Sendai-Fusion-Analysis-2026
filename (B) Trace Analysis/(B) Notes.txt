@@ -1,0 +1,1567 @@
+
+==========================================================================================
+                         ANALYZE TRACE DATA  —  PIPELINE NOTES
+                   Rawle Lab  ·  Williams College  ·  Matthew D. Mitchell
+==========================================================================================
+
+
+
+
+==========================================================================================
+  PART 0  —  SETUP  (before the per-trace loop)
+==========================================================================================
+
+  This section runs once at program startup. It loads options and the input data file,
+  then initialises counters before handing off to the per-trace loop.
+
+
+  ───────────────────────────────────────────────────────────────────────────────────────
+  OPTIONS
+  ───────────────────────────────────────────────────────────────────────────────────────
+
+  Setup_Options() is the single overall/pipeline options entry point, loaded once at
+  the top of the function. It assembles three per-algorithm parameter structs (each
+  from its own Parameters_*.m file) plus pipeline-wide settings:
+
+    Options.Display.DoPlot        Single pipeline-wide plot toggle, applied to both
+                                   sfOpts.Display.DoPlot and ubOpts.Display.DoPlot below
+                                   (overriding whatever each Parameters_*.m defaults to)
+                                   so there's one place to turn plotting on/off.
+
+    Options.ClipWidth              Frames dropped from each end of every trace by
+                                   Seek_Fusion/Seek_Unbounds after smoothing. Single
+                                   shared value for both detectors.
+
+    sfOpts = Options.SeekFusion  ·  Parameters_Seek_Fusion()
+               Controls all parameters for Seek_Fusion and Find_Fusion_Frame.
+
+    ubOpts = Options.SeekUnbounds  ·  Parameters_Seek_Unbounds()
+               Controls all parameters for Seek_Unbounds and Find_Unbound_Frame.
+               Seek_Unbounds handles its own smoothing internally using these options.
+
+    Assign_Review_Priority_Options = Options.AssignReviewPriority  ·  Parameters_Assign_Review_Priority()
+               Controls all parameters for the H1–H5 review priority rules.
+
+
+  ───────────────────────────────────────────────────────────────────────────────────────
+  INPUT DATA
+  ───────────────────────────────────────────────────────────────────────────────────────
+
+  Expected format:  Part A output .mat file containing InputTraceData (struct array).
+
+  Each element of InputTraceData represents one virus trace and has at minimum:
+    · Trace_BackSub              —  background-subtracted intensity trace, ALREADY starting
+                                     one frame after the finding image (native index 1 ==
+                                     global frame FrameNumFound+1 — see Part 1)
+    · TimeVector                —  time in MINUTES per frame (Part A converts ms -> minutes;
+                                     natively indexed the same way as Trace_BackSub, NOT by
+                                     raw/global frame number — see Part 1 and Part 5)
+    · focusframenumbers        —  optional: global frame indices of microscope focus events
+    · FocusFrameNumbers_Shifted —  alternative focus field (see Part 1 — Focus Indices)
+
+  [UPDATE]: FrameNumFound is NOT a real per-trace field on the raw input struct — Part A
+  (Find_And_Analyze_Particles.m) never saves it per-trace. It exists only at the FILE
+  level, as OtherDataToSave.GlobalFindingImageFrame, since every trace in one Program A
+  file shares the same pH-drop/finding-image frame. Analyze_Trace_Data.m reads it once
+  from there (erroring clearly if that field is missing) and writes it explicitly onto
+  every output trace as .FrameNumFound, so Part C/D/E still see it per-trace as before —
+  it just isn't a genuine Part A passthrough.
+
+  For the reference bind TIME (as opposed to the bind FRAME), two sources are tried in
+  order (see Part 5 for the full detail): OtherDataToSave.StandardBindTime /
+  OtherImportedData.StandardBindTime if present and nonzero; otherwise
+  OtherDataToSave.VideoTimeVector(FrameNumFound)/(1000*60) — NOT TimeVector(FrameNumFound),
+  which is natively indexed starting at FrameNumFound+1 and would silently read the wrong
+  frame's time (or throw an out-of-bounds error for late-trace events).
+
+
+  ───────────────────────────────────────────────────────────────────────────────────────
+  COUNTERS
+  ───────────────────────────────────────────────────────────────────────────────────────
+
+  Eight counters are initialised to zero and incremented in the per-trace loop:
+
+  Designation counters:
+    n1F   ·  '1 Fuse' traces
+    n2F   ·  '2 Fuse' traces
+    nNF   ·  'No Fusion' traces
+    nUB   ·  'Unbound' traces
+    nOT   ·  'Other' traces (ambiguous — definitely requires human review)
+
+  Review priority counters:
+    nLow  ·  traces assigned Low review priority
+    nMed  ·  traces assigned Medium review priority
+    nHigh ·  traces assigned High review priority
+
+  All eight are printed to the console in the summary at the end of the run.
+
+
+
+
+==========================================================================================
+  PART 1  —  CLIP AND FOCUS INDICES
+==========================================================================================
+
+  The first step inside the per-trace loop prepares two things that every downstream
+  algorithm will use: a clipped trace and a set of focus frame indices converted into
+  the coordinate system of that clipped trace.
+
+
+  ───────────────────────────────────────────────────────────────────────────────────────
+  WHY CLIPPING IS NECESSARY
+  ───────────────────────────────────────────────────────────────────────────────────────
+
+  Each recording begins with a fixed sequence of setup images before the timelapse
+  proper starts. These early images have intensity values that do not reflect virion
+  behaviour and must be excluded from all analysis:
+
+  Below is the explanation for the current (normal) procedure
+
+    Image 1  —  Timer start. Taken immediately when virus is added to the channel.
+                 Intensity is meaningless for fusion/unbinding assessment.
+
+    Image 2  —  Finding image (FrameNumFound). Taken at higher laser power to locate 
+                 virions. Intensity is artificially elevated and cannot be compared
+                 to the timelapse frames that follow.
+
+    Image 3  —  The first frame of the low-power timelapse; this is
+                 the frame where the summed power/intensity value
+                 first matters for the sake of our analysis.
+
+    Image 4+  —  Image 4 is the first frame where we can observe fusion or unbinding.
+
+  [UPDATE]: Part A now does the Image-1/Image-2 exclusion FOR us, upstream of Part B.
+  Part A's StartAnalysisFrameNumber is now FrameNumToFindParticles + 1 (previously it
+  equaled FrameNumToFindParticles) — Trace_BackSub/TimeVector are built starting exactly
+  at StartAnalysisFrameNumber, so Image 1 (time-zero) AND Image 2 (the finding image)
+  are BOTH already excluded before the trace ever reaches Part B. Trace_BackSub's own
+  native index 1 is therefore already global Image 3 (== global frame FrameNumFound+1).
+
+  Classification algorithms (Seek_Fusion, Seek_Unbounds) only operate on this
+  analysis window — and no slicing is needed to get there anymore:
+
+    clip = fullTrace          % NOT fullTrace(FrameNumFound+1:end) -- fullTrace's own
+                              % native index 1 is ALREADY global frame FrameNumFound+1,
+                              % so that slice would incorrectly skip FrameNumFound MORE
+                              % frames on top of what Part A already excluded.
+
+  Clipped frame index 1 corresponds to global frame FrameNumFound + 1
+  (global image 3 under normal circumstances) — same as always; only HOW that alignment
+  is achieved changed (upstream in Part A now, not by slicing here).
+
+
+  ───────────────────────────────────────────────────────────────────────────────────────
+  THE TWO COORDINATE SYSTEMS
+  ───────────────────────────────────────────────────────────────────────────────────────
+
+  Throughout the pipeline two indexing systems are in use simultaneously. Mixing them
+  silently produces wrong results:
+
+    GLOBAL frame numbers   —  1-based indices into the full Trace_BackSub vector.
+                              Used by: FrameNumFound, TimeVector, focusframenumbers,
+                              and all output "...Global" fields.
+
+    CLIPPED frame indices  —  1-based indices into clip (the post-pH-drop trace).
+                              Clipped index k  =  global frame (FrameNumFound + k).
+                              Used by: all algorithm score arrays, fusion/unbound frame
+                              localisation, and all internal "...Clipped" fields.
+
+  Conversion formulae:
+    global  →  clipped :   clippedIdx = globalIdx - FrameNumFound
+    clipped →  global  :   globalIdx  = clippedIdx + FrameNumFound
+
+
+  ───────────────────────────────────────────────────────────────────────────────────────
+  FOCUS INDICES
+  ───────────────────────────────────────────────────────────────────────────────────────
+
+  Focus events are frames where the microscope Z-position was changed by the definite focus.
+  This can single-frame intensity artifacts that look like fusion/unbinding spikes. 
+  Seek_Fusion Test 5 uses these indices to veto fusion candidates that are caused by a focus jump 
+  rather than real fusion.
+
+  Focus frames are stored in the Part A struct in global coordinates under one of
+  two field names (the pipeline accepts either):
+
+    focusframenumbers          —  primary field; directly stores global frame numbers.
+    FocusFrameNumbers_Shifted  —  alternative field; stores frames relative to the
+                                  start of acquisition and must be shifted by +fs
+                                  to convert to global. (This field name reflects a
+                                  historical shift applied during Part A processing.)
+
+  After reading whichever field is present, the pipeline:
+    1. Strips NaN values (unused slots in the array are padded with NaN in Part A).
+    2. Subtracts FrameNumFound to convert global → clipped coordinates.
+    3. Discards any focus frames that fall outside the clipped trace
+       (i.e. focus events that occurred before frame FrameNumFound + 1 are irrelevant).
+
+  If neither focus field is present, focusClipped is left empty. Seek_Fusion Test 5
+  then auto-passes all candidates (no focus veto is applied).
+
+  [UPDATE — SECOND SHIFT FOR ClipWidth]: The conversion above (global → clipped) is
+  passed into Seek_Fusion as-is. Seek_Fusion then applies a SECOND, independent shift
+  internally: it subtracts ClipWidth from the incoming indices to align them with its
+  own internally-trimmed trace/smoothed-trace (see Part 2/3's ClipWidth notes). This
+  second shift is NOT done here in Analyze_Trace_Data.m for the Seek_Fusion call itself
+  (Seek_Fusion owns it) — but Analyze_Trace_Data.m DOES redundantly recompute this same
+  second shift once more, separately, right before calling Assign_Review_Priority (its
+  H2b rule needs focus indices in that same ClipWidth-trimmed space to compare against
+  sfData.FuseFramesClipped). Both computations must stay in agreement; verified by
+  worked example (fs=100, ClipWidth=5, focus at global frame 130 → focusClipped=30 →
+  Seek_Fusion's internal copy becomes 25, and Assign_Review_Priority's focusClippedTrimmed
+  is separately computed as the same 25).
+
+
+
+
+==========================================================================================
+  PART 2  —  SEEK UNBOUNDS
+==========================================================================================
+
+  Seek_Unbounds scans every frame of the clipped trace for evidence of an unbinding
+  event — the moment a bound virion detaches from the target membrane and its
+  fluorescence intensity drops back toward baseline (near 0).
+
+  It does NOT classify the trace. It returns a score array (one integer per frame)
+  and three diagnostic traces. The caller (Analyze_Trace_Data) reads the score array
+  and together with other data decides whether the trace should be classified as Unbound.
+
+
+  ───────────────────────────────────────────────────────────────────────────────────────
+  PRE-PROCESSING
+  ───────────────────────────────────────────────────────────────────────────────────────
+
+  Before any test runs, the raw clipped trace is passed through Calculate_Sliding_Window:
+
+    Method:       sliding median
+    WindowWidth:  3 frames  (±1 frame on each side, plus center)
+    RaiseToZero:  yes  (output is shifted so its minimum equals zero)
+    ClipWidth:    5 frames  (see below — [UPDATE])
+
+  [UPDATE — ClipWidth]: Calculate_Sliding_Window is now given the FULL clip (including
+  its first/last 5 frames) so those frames can serve as real smoothing context, then
+  trims that same 5 frames off each end of its OUTPUT before returning. Seek_Unbounds
+  mirrors the trim on its own raw `trace` copy right after the smoothing call, so every
+  output (scoreArray, diffTrace, etc. — see OUTPUTS below) ends up 10 frames shorter
+  than clip, not the same length. This kills the early false positives the old
+  symmetric-boundary-shrink smoothing produced, while still using genuine data (not an
+  artificially narrowed window) for the frames that remain. ClipWidth is a single value
+  shared with Seek_Fusion, defined once in Setup_Options.m (Options.ClipWidth), and
+  passed into both as an explicit argument.
+
+  The window width of 3 is intentionally very narrow. Seek_Unbounds is looking for a
+  sharp, step-like intensity drop. A wide smoother would blur the step and make the
+  drop harder to detect precisely. At width 3, the smoothed trace is nearly identical
+  to the raw trace — it mainly suppresses single-frame spikes without distorting 
+  the shape of a genuine unbinding step.
+
+  The RaiseToZero shift is applied after smoothing. It ensures all intensity values
+  are non-negative, which makes the fractional calculations in Test 2 well-behaved. 
+
+  The smoothed trace is returned as an output so Part C can display it alongside the
+  raw trace without recomputing.
+
+
+  ───────────────────────────────────────────────────────────────────────────────────────
+  THE SCORING SYSTEM
+  ───────────────────────────────────────────────────────────────────────────────────────
+
+  Seek_Unbounds uses a binary accumulator. Every frame starts with a score of zero.
+  Each test that fires adds a fixed number of points:
+
+    Test 1  →  +1
+    Test 2  →  +2
+    Test 3  →  +4
+    Test 4  →  +8
+
+  T2, T3, and T4 all gate on T1 independently. Each can fire or not fire on any frame
+  where T1 has passed. This enables full diagnostic scoring: a frame can score T1+T3+T4
+  without T2, which is informative for grading even though it cannot reach the Unbound
+  threshold. The eight reachable outcomes are:
+
+    Score   Binary    Tests passed
+    ─────   ──────    ────────────────────────────────────────
+      1     0001      T1 only
+      3     0011      T1 + T2
+      5     0101      T1 + T3
+      7     0111      T1 + T2 + T3
+      9     1001      T1 + T4
+     11     1011      T1 + T2 + T4     ←  near-miss (T3 failed = floor not sustained)
+     13     1101      T1 + T3 + T4
+     15     1111      T1 + T2 + T3 + T4     ←  Unbound candidate
+
+  Score 15 is the only outcome that reaches classification as an unbound event.
+  Score 11 (T1+T2+T4, T3 failed) is the near-miss score checked by
+  Assign_Review_Priority (H4). However, score 11 alone is not sufficient to trigger H4 —
+  the check is refined by t3ViolationCount (see Seek_Unbounds outputs below). A score-11
+  frame only qualifies as a near-miss if the number of frames that exceeded postDropCeiling
+  during the T3 scan is ≤ H4.UB_T3MaxViolations (default 25). This filters out traces
+  that failed T3 decisively (e.g. 300 violations out of 500 frames) from genuine near-misses
+  (e.g. 3 violations out of 500 frames).
+
+  NOTE: The parameter for T4 is stored under the key Options.Test5.PreElevationLength
+  for legacy reasons (an earlier T4 was once removed and T5 was renumbered). The
+  parameter name is a legacy artifact; the test itself is unambiguously Test 4.
+
+  Reaching score 15 still requires all four tests — changing the gate structure from
+  "T3/T5 require T1+T2" to "T2/T3/T5 each independently require T1" does not change
+  which traces are classified Unbound. It only enriches the diagnostic score breakdown.
+
+
+  ───────────────────────────────────────────────────────────────────────────────────────
+  TEST 1  —  LOOKBACK DROP
+  Bit score:  +1  ·  No gate  ·  Default threshold:  −175 intensity units
+  ───────────────────────────────────────────────────────────────────────────────────────
+
+  WHAT IT TESTS:
+  Whether the trace at frame i is substantially lower than it was LookBack frames ago.
+  This is the primary drop detector — it identifies frames where a step-down has
+  recently occurred.
+
+  HOW IT WORKS:
+  For every frame i, a helper function (diffPast) computes:
+
+    diffPast(i)  =  smoothed(i)  −  smoothed(i − LookBack)
+
+  LookBack = 8 frames. This value is negative when the trace has dropped and positive
+  when it has risen. The first LookBack frames cannot be computed and are set to NaN.
+
+  A frame passes Test 1 if:   diffPast(i)  <  −175
+
+  In other words: the smoothed intensity must have fallen by more than 175 units over
+  the past 8 frames. The result is stored in diffTrace and returned as an output.
+
+  WHY THIS THRESHOLD:
+  175 units is set to filter out small noise fluctuations while catching genuine
+  unbinding steps, which typically drop hundreds to thousands of intensity units.
+
+  ROLE IN THE PIPELINE:
+  Test 1 alone is a broad net — many frames in many traces will pass it. It is
+  designed to cast wide and let Tests 2–5 do the filtering. T1 is the universal
+  gate: Tests 2, 3, and 5 all require T1 to have fired before they evaluate.
+
+
+  ───────────────────────────────────────────────────────────────────────────────────────
+  TEST 2  —  FRACTIONAL LOOKBACK DROP
+  Bit score:  +2  ·  Gate: T1 must have fired  ·  Default threshold:  −0.60  (60% drop)
+  ───────────────────────────────────────────────────────────────────────────────────────
+
+  WHAT IT TESTS:
+  Whether the intensity drop at frame i is large RELATIVE to the level before the drop.
+  A raw drop of 175 units means very different things at different baseline levels —
+  it is huge for a dim virion (baseline ~300) but trivial for a bright one (~5000).
+  Test 2 normalises for this.
+
+  HOW IT WORKS:
+  For each frame i where smoothed(i) < smoothed(i − LookBack):
+
+    ref         =  smoothed(i − LookBack)          (the pre-drop reference level)
+    fracDrop(i) =  (smoothed(i) − ref) / ref       (negative, since smoothed(i) < ref)
+
+  A frame passes Test 2 if EITHER condition holds:
+
+    (a)  fracDrop(i) < −0.60     (drop is at least 60% of the pre-drop level)
+    (b)  ref − smoothed(i) > 5000     (absolute fallback for very large steps)
+
+  Condition (a) is the primary test. Condition (b) is set very high (5000 units) and
+  is effectively a safety net for extremely bright traces where a real unbinding step
+  might not quite reach 60% fractionally.
+
+  The fracDrop value is stored in fracTrace and returned as an output.
+
+  EXAMPLE:
+    Trace drops from 800 → 200  :  fracDrop = (200−800)/800 = −0.75  →  passes
+    Trace drops from 5000 → 4600:  fracDrop = (4600−5000)/5000 = −0.08  →  fails
+    Trace drops from 5000 → 500 :  fracDrop = (500−5000)/5000 = −0.90  →  passes
+
+
+  ───────────────────────────────────────────────────────────────────────────────────────
+  TEST 3  —  SUSTAINED POST-DROP FLOOR
+  Bit score:  +4  ·  Gate: T1 must have fired  ·  Default window:  500 frames
+  ───────────────────────────────────────────────────────────────────────────────────────
+
+  WHAT IT TESTS:
+  Whether the drop is SUSTAINED. Tests 1 and 2 only confirm that a drop occurred at
+  a single point in time. Test 3 confirms the trace remains low for a significant
+  period afterward — the defining characteristic of a genuine unbinding event, in which
+  the virion has permanently detached and the intensity stays near its new lower level.
+
+  HOW IT WORKS:
+  For each frame that passed T1, a post-drop ceiling is defined as the midpoint
+  between the current (post-drop) level and the pre-drop reference level:
+
+    postDropCeiling  =  mean( smoothed(i),  smoothed(i − LookBack) )
+
+  The test then checks all frames in the window [i+1, i+FloorLength]:
+
+    max( smoothed(i+1 : i+FloorLength) )  ≤  postDropCeiling
+
+  If the trace stays entirely at or below this midpoint for all 500 frames forward,
+  Test 3 passes. If the trace rises above it at any point, the test fails.
+
+  VULNERABILITY — MULTI-FRAME LANDINGS:
+  Test 3 is the primary check for sustained decrease, but it is vulnerable to landing
+  events. If, after a genuine unbinding event, a virion settles down in the same ROI 
+  for >1 frames the post-drop region rises above postDropCeiling and Test 3 fails even
+  though an unbinding event did occur. This is a place where improvements could be made.
+
+  BOUNDARY BEHAVIOUR:
+  If i+FloorLength exceeds the end of the trace, the window is clamped to the last
+  frame. Frames near the end of the trace get a shorter forward check and may pass
+  Test 3 more easily — Test 5 exists partly to compensate for this. 
+
+
+
+  ───────────────────────────────────────────────────────────────────────────────────────
+  TEST 4  —  PRE-DROP SUSTAINED ELEVATION CHECK
+  Bit score:  +8  ·  Gate: T1 must have fired  ·  Default window:  20 frames
+  ───────────────────────────────────────────────────────────────────────────────────────
+
+  WHAT IT TESTS:
+  Whether the trace was STABLY elevated for a sustained period BEFORE the drop — not
+  just momentarily elevated at a single frame.
+
+  This is the primary filter against two specific false positive types:
+    · Landing events — arrive as a brief bright spike before dropping; the 20-frame
+      pre-drop window would show the trace was at baseline before the spike, not stably
+      elevated.
+    · End-of-trace artifacts — a trace that drifts down near the very last frames
+      can trivially pass T3 (short forward window), but T4 looks backward and confirms
+      the elevation was stable before the apparent drop. Unfortunately drops due to noise
+      that occur in the last ~5 frames can still be falsely marked as unbinding.
+
+  HOW IT WORKS:
+  For each frame that passed T1:
+
+    refFrame       =  i − LookBack
+    winStart       =  max(refFrame − PreElevationLength,  1)   (clamped at frame 1)
+    elevationFloor =  mean( smoothed(i),  smoothed(refFrame) ) (same midpoint as T3)
+
+  Test 4 passes if:   min( smoothed(winStart : refFrame) )  ≥  elevationFloor
+
+  Note: the same midpoint computation is used in T3 (as postDropCeiling, an upper
+  bound for the post-drop region) and here in T4 (as elevationFloor, a lower bound
+  for the pre-drop region). Same formula, opposite role.
+
+  Every frame in the 20-frame window ending at refFrame must be at or above this
+  floor. A single dip below it in that window causes a failure.
+
+
+  ───────────────────────────────────────────────────────────────────────────────────────
+  OUTPUTS
+  ───────────────────────────────────────────────────────────────────────────────────────
+
+  Seek_Unbounds returns five arrays. [UPDATE] They are NOT the same length as the input
+  clip anymore — each is trimmed by ClipWidth on each end (10 frames shorter than clip
+  total; see PRE-PROCESSING above), and their own index 1 corresponds to global frame
+  FrameNumFound + ClipWidth + 1, not FrameNumFound + 1:
+
+    scoreArray       —  The accumulated score at each frame. Read by the caller:
+                          Score == 15  →  all four tests passed  →  Unbound candidate
+                          Score == 11  →  T1+T2+T4 (T3 failed) →  potential near-miss
+                        In Analyze_Trace_Data, high-scoring frames (score >= 15) are grouped
+                        into clusters (separated by MinEventSeparation = LookBack frames):
+                          ubClusterCount == 0  →  No unbinding detected
+                          ubClusterCount == 1  →  Unbound
+                          ubClusterCount >= 2  →  Other (ambiguous; needs review)
+
+    diffTrace        —  The T1 key value at each frame: smoothed(i) − smoothed(i−LookBack).
+                        Negative values represent drops. NaN for the first LookBack frames.
+                        Saved in the output struct for diagnostic plotting in Part C.
+
+    fracTrace        —  The T2 key value: fractional drop relative to the pre-drop level.
+                        NaN at frames where no drop was detected. Saved for diagnostic plotting.
+
+    smoothedTrace    —  The width-3 median-smoothed trace used internally by all tests.
+                        Saved so Part C can display it alongside the raw trace without
+                        recomputing.
+
+    t3ViolationCount —  The number of post-drop frames that exceeded postDropCeiling during
+                        the T3 scan, at each frame where T1 passed and T3 was evaluated.
+                        NaN at all frames where T1 did not pass (T3 was never run).
+                        0 at frames where T3 passed (all FloorLength frames stayed below ceiling).
+                        >0 at frames where T3 failed — the value is the violation count.
+                        Used by Assign_Review_Priority H4 to separate genuine near-misses
+                        (low violation count) from clear T3 failures (high violation count).
+                        Stored in ubData.T3ViolationCount in the output struct.
+
+
+
+
+==========================================================================================
+  PART 3  —  SEEK FUSION
+==========================================================================================
+
+  Seek_Fusion scans every frame of the clipped trace for evidence of a fusion event —
+  the moment a bound virion fuses with the target membrane and its fluorescence intensity
+  rises sharply as the lipid dye dequenches.
+
+  It is the mirror image of Seek_Unbounds. Where Seek_Unbounds looks BACKWARD from each
+  frame to detect a past drop, Seek_Fusion looks FORWARD from each frame to detect an
+  upcoming rise. Frame i is the pre-rise low point; the rise is confirmed by checking
+  what happens LookForward frames later.
+
+  Like Seek_Unbounds, it does NOT classify the trace. It returns a score array and
+  diagnostic traces. The caller reads the score array and counts fusion clusters.
+
+
+  ───────────────────────────────────────────────────────────────────────────────────────
+  PRE-PROCESSING
+  ───────────────────────────────────────────────────────────────────────────────────────
+
+  Before any test runs, the raw clipped trace is passed through Calculate_Sliding_Window:
+
+    Method:       sliding median
+    WindowWidth:  25 frames  (±12 frames on each side, plus center)
+    RaiseToZero:  yes
+    ClipWidth:    5 frames  (same shared value as Seek_Unbounds — see its PRE-PROCESSING
+                             [UPDATE] note above for the full mechanism)
+
+  Because WindowWidth=25 (half-width 12) is much larger than ClipWidth=5, the first
+  surviving frame (old clip-index 6) can only use all 5 real context frames as a partial
+  window — it doesn't reach the full ±12 half-width until index 6+12-5=13. Seek_Unbounds'
+  much narrower half-width (1, from WindowWidth=3) reaches full width almost immediately.
+
+  The window is intentionally wide — much wider than Seek_Unbounds (width 3). This is
+  because fusion detection is tolerant of blurring. A wide smoother suppresses noise
+  and short-duration spikes (including brief landing events) so the score tests are not
+  distracted by them. The tradeoff is that the smoothed trace cannot resolve very rapid
+  intensity changes, but fusion events are more gradual making this acceptable.
+
+  The smoothed trace is returned as an output so Part C can display it alongside the
+  raw trace without recomputing.
+
+
+  ───────────────────────────────────────────────────────────────────────────────────────
+  THE SCORING SYSTEM
+  ───────────────────────────────────────────────────────────────────────────────────────
+
+  Seek_Fusion uses the same binary accumulator structure as Seek_Unbounds. Every frame
+  starts with a bit score of zero. Tests add fixed powers-of-2 bit scores:
+
+    Test 1  →  +1
+    Test 2  →  +2
+    Test 3  →  +4
+    Test 4  →  +8
+    Test 5  →  +16
+
+  The gate structure: all of T2, T3, T4, and T5 gate on T1 independently (each requires
+  bitand(score,1)==1 before evaluating). Any subset of T2/T3/T4/T5 can fire on a given
+  frame, as long as T1 has fired. This enables full diagnostic scoring — a frame that
+  passes T1+T3+T4 but fails T2 (score 13) provides useful grading information about
+  how close it came to fusion classification, even though it cannot reach score 31.
+  Classification is unchanged: score 31 still requires all five tests.
+
+  Reachable scores are all odd numbers from 1 to 31 (any combination where T1 has fired):
+
+    Score   Binary    Tests passed
+    ─────   ──────    ────────────────────────────────────
+      1     00001     T1 only
+      3     00011     T1 + T2
+      5     00101     T1 + T3
+      7     00111     T1 + T2 + T3
+      9     01001     T1 + T4
+     11     01011     T1 + T2 + T4
+     13     01101     T1 + T3 + T4
+     15     01111     T1 + T2 + T3 + T4
+     17     10001     T1 + T5
+     19     10011     T1 + T2 + T5
+     21     10101     T1 + T3 + T5
+     23     10111     T1 + T2 + T3 + T5
+     25     11001     T1 + T4 + T5
+     27     11011     T1 + T2 + T4 + T5
+     29     11101     T1 + T3 + T4 + T5
+     31     11111     T1 + T2 + T3 + T4 + T5     ←  Fusion candidate
+
+  Score 31 is the only outcome that reaches classification as a fusion event.
+
+
+  ───────────────────────────────────────────────────────────────────────────────────────
+  TEST 1  —  LOOKFORWARD RISE
+  Bit score:  +1  ·  No gate  ·  Default threshold:  200 intensity units
+  ───────────────────────────────────────────────────────────────────────────────────────
+
+  WHAT IT TESTS:
+  Whether the trace LookForward frames ahead of frame i is substantially higher than
+  it is at frame i. Frame i represents the pre-rise trough — the last low point before
+  the fluorescence jumps.
+
+  HOW IT WORKS:
+  For every frame i from 1 to n−LookForward:
+
+    diffFwd(i)  =  smoothed(i + LookForward)  −  smoothed(i)
+
+  LookForward = 15 frames. This value is positive when the trace has risen and negative
+  when it has fallen. The last LookForward frames cannot be evaluated and remain NaN.
+
+  A frame passes Test 1 if:   diffFwd(i)  >  200
+
+  The result is stored in diffTrace and returned as an output.
+
+  ROLE IN THE PIPELINE:
+  Like T1 in Seek_Unbounds, this is a broad net — it will fire on many frames in
+  rising traces. Tests 2–5 do the filtering. T1 is the universal gate: T2, T3, T4,
+  and T5 all require T1 to have fired before they evaluate.
+
+
+  ───────────────────────────────────────────────────────────────────────────────────────
+  TEST 2  —  FRACTIONAL LOOKFORWARD RISE
+  Bit score:  +2  ·  Gate: T1 must have fired  ·  Threshold:  bin-dependent (15 bins)
+  ───────────────────────────────────────────────────────────────────────────────────────
+
+  WHAT IT TESTS:
+  Whether the rise is large RELATIVE to the pre-rise intensity level. A raw rise of
+  200 units is very different depending on whether the trace was at 300 (a 67% jump)
+  or at 10,000 (a 2% jump). Test 2 normalises for baseline intensity.
+
+  HOW IT WORKS:
+  For each frame i where smoothed(i + LookForward) > smoothed(i):
+
+    ref        =  smoothed(i)           (the pre-rise level at frame i)
+    fracRise   =  (smoothed(i+lf) − ref)  /  max(abs(ref), 1)
+
+  The threshold is looked up from a 15-element table based on which 1000-unit bin
+  ref falls into:
+
+    Bin  1:  ref in [0,    1000)  →  threshold = 0.15
+    Bin  2:  ref in [1000, 2000)  →  threshold = 0.20
+    Bin  3:  ref in [2000, 3000)  →  threshold = 0.15
+    Bin  4:  ref in [3000, 4000)  →  threshold = 0.12
+    Bin  5:  ref in [4000, 5000)  →  threshold = 0.15
+    Bin  6:  ref in [5000, 6000)  →  threshold = 0.10
+    Bin  7:  ref in [6000, 7000)  →  threshold = 0.15
+    Bin  8:  ref in [7000, 8000)  →  threshold = 0.08
+    Bin  9:  ref in [8000, 9000)  →  threshold = 0.15
+    Bin 10:  ref in [9000,10000)  →  threshold = 0.08
+    Bin 11:  ref in [10000,11000) →  threshold = 0.15
+    Bin 12:  ref in [11000,12000) →  threshold = 0.15
+    Bin 13:  ref in [12000,13000) →  threshold = 0.05
+    Bin 14:  ref in [13000,14000) →  threshold = 0.15
+    Bin 15:  ref ≥ 14000          →  threshold = 0.08
+
+  Brighter virions (higher baseline) have lower thresholds because the fractional
+  change at fusion is naturally smaller for high-intensity traces. The bin-dependent
+  table was tuned empirically to maintain consistent sensitivity across intensity ranges.
+
+  EXAMPLE:
+    Trace rises from 500 → 800:   fracRise = 300/500 = 0.60  →  passes (threshold 0.13)
+    Trace rises from 8000 → 8400: fracRise = 400/8000 = 0.05 →  fails  (threshold 0.08)
+    Trace rises from 8000 → 9200: fracRise = 1200/8000 = 0.15 → passes (threshold 0.08)
+
+  The fracRise value is stored in fracTrace and returned as an output.
+
+
+  ───────────────────────────────────────────────────────────────────────────────────────
+  TEST 3  —  POST-RISE SUSTAINED ELEVATION
+  Bit score:  +4  ·  Gate: T1 must have fired  ·  Default window:  90 frames
+  ───────────────────────────────────────────────────────────────────────────────────────
+
+  WHAT IT TESTS:
+  Whether the rise is SUSTAINED. Tests 1 and 2 confirm that a rise occurred at a
+  single moment. Test 3 confirms the trace remains elevated for a significant period
+  afterward — the defining feature of genuine fusion, where the dequenched dye stays
+  bright after the membranes merge.
+
+  HOW IT WORKS:
+  For each frame that passed T1, a floor is defined as the midpoint between the
+  pre-rise level and the post-rise level:
+
+    riseFloor  =  mean( smoothed(i),  smoothed(i + LookForward) )
+
+  The test then checks all frames in the window [i+LookForward, i+LookForward+CeilingLength]:
+
+    min( smoothed(i+lf : i+lf+CeilingLength) )  ≥  riseFloor
+
+  If the trace stays at or above this midpoint for all 90 frames after the rise,
+  Test 3 passes. If the trace falls below it at any point, the test fails.
+
+  COMPARE TO SEEK_UNBOUNDS TEST 3:
+  Seek_Unbounds T3 checks that the trace stays BELOW postDropCeiling (a ceiling).
+  Seek_Fusion T3 checks that the trace stays ABOVE riseFloor (a floor).
+  Both use the same midpoint formula: mean(pre-event level, post-event level).
+  Same idea, mirrored direction.
+
+  NOTE ON CeilingLength vs FloorLength:
+  Seek_Fusion uses CeilingLength = 90 frames. Seek_Unbounds uses FloorLength = 500.
+  Unbinding requires a permanently sustained floor (the virion is gone — it should
+  never come back). Fusion only requires that the elevated state persist long enough
+  to confirm it was not a spike — a virion can photobleach after fusion and its
+  intensity may gradually decay, which is not a reason to reject the event.
+
+
+  ───────────────────────────────────────────────────────────────────────────────────────
+  TEST 4  —  PRE-RISE SUSTAINED LOW
+  Bit score:  +8  ·  Gate: T1 must have fired
+  ───────────────────────────────────────────────────────────────────────────────────────
+
+  WHAT IT TESTS:
+  Whether the trace was genuinely LOW for a sustained period BEFORE the rise. A
+  genuine fusion event starts from a stable low state — the virion has been bound
+  (dim) for some time before the pH drop triggers fusion. A false positive from
+  noise or a focus artifact that happens to look like a rise will often have a trace
+  that was already elevated or fluctuating before the apparent rise start.
+
+  This test is the forward-looking mirror of Seek_Unbounds Test 5. Where T5 in
+  Seek_Unbounds checks that the trace was stably elevated before the drop, T4 here
+  checks that the trace was stably LOW before the rise.
+
+  HOW IT WORKS:
+  For each frame that passed T1, both the rise midpoint and a pre-rise ceiling
+  are computed using the same formula as Test 3:
+
+    riseFloor  =  mean( smoothed(i),  smoothed(i + LookForward) )
+    ceiling    =  PreRiseFraction  ×  riseFloor
+
+  PreRiseFraction = 1.000. With this value, ceiling = riseFloor exactly — the same
+  midpoint that Test 3 uses as its sustained-elevation floor. The pre-rise window
+  must stay BELOW what Test 3 requires the post-rise window to stay ABOVE.
+
+  The test then checks a backward window of PreRiseLength frames ending just before i:
+
+    preStart  =  max(1,  i − PreRiseLength)
+
+  Test 4 passes if:   max( smoothed(preStart : i−1) )  <  ceiling
+
+  The window shrinks automatically at the trace boundary. If fewer than 2 pre-rise
+  frames are available (i ≤ 2), Test 4 auto-passes.
+
+  PARAMETERS:
+    PreRiseLength   = 150 frames   (look back up to 150 frames before frame i)
+    PreRiseFraction = 1.000        (ceiling = midpoint of the detected step)
+
+  EFFECT OF PreRiseFraction:
+    < 1.0  →  ceiling lower than midpoint (stricter — rejects more candidates)
+    = 1.0  →  ceiling = midpoint (symmetric with T3's floor)
+    > 1.0  →  ceiling higher than midpoint (more lenient)
+
+
+  ───────────────────────────────────────────────────────────────────────────────────────
+  TEST 5  —  FOCUS FRAME VETO
+  Bit score:  +16  ·  Gate: T1 must have fired (bitand(score,1)==1)
+  ───────────────────────────────────────────────────────────────────────────────────────
+
+  WHAT IT TESTS:
+  Whether the apparent rise at frame i was caused by a MICROSCOPE FOCUS EVENT rather
+  than a real fusion. Focus events cause a 1 frame intensity spike in the raw trace.
+  If a focus frame falls inside the detection window [i, i+LookForward], the detected
+  rise may be the focus artifact rather than a fusion event.
+
+  Test 5 is fundamentally different from Seek_Unbounds T5. Where Seek_Unbounds T5 checks
+  the stability of the pre-drop region, Seek_Fusion T5 checks whether a focus jump can
+  explain the detected rise. It is a veto — it can only remove candidates, never add them.
+
+  HOW IT WORKS:
+  For each frame that passed T1 (bitand(score,1)==1):
+
+    1.  Compute the window intensity range on the SMOOTHED trace over the STANDARD window:
+          windowRange = max(smoothed(i : i+LookForward))  −  min(smoothed(i : i+LookForward))
+    2.  Identify any focus indices (clipped coords) that fall in the EXTENDED window:
+          [i,  i + LookForward + FocusLookExtra]
+        FocusLookExtra = 1 by default. The range calculation uses the standard window;
+        only the focus-frame search is extended. This catches focus spikes just beyond
+        the detection window whose smoothed influence can still elevate smoothed(i+lf).
+    3.  For each focus frame fIdx in the extended window, measure the jump on the RAW
+        trace (not smoothed). Focus events are 1–2 frame spikes that the median smoother
+        (width=25) suppresses almost completely — measuring on the smoothed trace would
+        make all focus events appear near-zero and the veto would never fire:
+          focusJump = trace(fIdx) − trace(fIdx − 1)
+    4.  Compute the ratio:   t5Ratio = max focusJump / windowRange
+    5.  If t5Ratio > FocusJumpThreshold (0.425):
+          → Frame FAILS. Score does NOT receive +16. Frame cannot be a fusion candidate.
+        If t5Ratio ≤ FocusJumpThreshold, or no focus frame is in the extended window:
+          → Frame PASSES. Score += 16 (reaching 31 if all other tests also passed).
+
+  PARAMETERS:
+  FocusJumpThreshold = 0.425. If the focus jump accounts for more than 42.5% of the
+  total intensity swing in the detection window, the candidate is rejected. A real
+  fusion event produces a sustained rise; a focus spike contributes a sharp one-frame
+  jump that dominates the window range.
+  FocusLookExtra = 1. Extends the focus-frame search by 1 frame beyond i+LookForward.
+
+  CALLER RESPONSIBILITY — index alignment:
+  focusframenumbers in the Part A struct are GLOBAL frame numbers. Seek_Fusion receives
+  a clipped trace. The caller must convert before passing:
+    clippedIdx = globalFocusFrame − FrameNumFound
+  Wrong indices here silently apply the veto at the wrong frames.
+
+  [UPDATE — ClipWidth second shift]: the clippedIdx passed in above is in the FULL clip's
+  coordinate space (untrimmed). Seek_Fusion internally subtracts ClipWidth from it (right
+  after smoothing, alongside trimming its own `trace` copy) to align with its own
+  internally-trimmed trace before Test 5 (or any other test) ever runs. The caller does
+  NOT need to pre-apply this second shift itself — passing the plain global→clipped value
+  above is correct and sufficient. See Part 1's Focus Indices [UPDATE] note for the
+  worked numeric example and why Assign_Review_Priority needs a parallel copy of this
+  same second shift computed separately in Analyze_Trace_Data.m.
+
+  NO FOCUS DATA:
+  If focusIndices is empty or not provided, all T1-passing candidates automatically pass
+  Test 5 (score += 16 unconditionally). The t5Ratio output stays NaN for all frames.
+
+
+  ───────────────────────────────────────────────────────────────────────────────────────
+  OUTPUTS
+  ───────────────────────────────────────────────────────────────────────────────────────
+
+  Seek_Fusion returns five arrays. [UPDATE] They are NOT the same length as the input
+  clip anymore — each is trimmed by ClipWidth on each end (10 frames shorter than clip
+  total; see PRE-PROCESSING above), and their own index 1 corresponds to global frame
+  FrameNumFound + ClipWidth + 1, not FrameNumFound + 1:
+
+    scoreArray    —  The accumulated score at each frame. Read by the caller:
+                       Score == 31  →  all five tests passed  →  Fusion candidate
+                     In Analyze_Trace_Data, high-scoring frames are grouped into
+                     clusters separated by MinEventSeparation = LookForward frames:
+                       sfClusterCount == 0  →  No Fusion
+                       sfClusterCount == 1  →  1 Fuse (one fusion event)
+                       sfClusterCount == 2  →  2 Fuse (two fusion events)
+                       sfClusterCount >= 3  →  Other (three or more — ambiguous)
+
+    diffTrace     —  The T1 key value at each frame: smoothed(i+LookForward) − smoothed(i).
+                     Positive values represent forward rises. NaN for the last LookForward
+                     frames (boundary — cannot look forward past end of trace).
+                     Saved in output struct for diagnostic plotting in Part C.
+
+    fracTrace     —  The T2 key value: fractional rise relative to the pre-rise level.
+                     NaN at frames where no rise was detected. Saved for diagnostic plotting.
+
+    t5Ratio       —  The T5 key value: focusJump / windowRange at each T1-passing frame.
+                     NaN at frames where T1 did not fire or no focus frame was in window.
+                     A value > FocusJumpThreshold means that frame was vetoed by a focus event.
+                     Saved for diagnostic plotting.
+
+    smoothedTrace —  The width-25 median-smoothed trace used internally by all tests.
+                     Saved so Part C can display it alongside the raw trace without
+                     recomputing.
+
+
+
+
+==========================================================================================
+  PART 4  —  FINDING THE EVENT FRAMES
+==========================================================================================
+
+  After Seek_Fusion and Seek_Unbounds score every frame, two frame-localisation
+  functions narrow down the exact frame where the event occurred within each scored
+  cluster. These run only on traces where the relevant algorithm detected something:
+
+    Find_Fusion_Frame   — called when sfClusterCount > 0
+    Find_Unbound_Frame  — called when ubClusterCount >= 1
+
+  Both use the same three-step approach: find high-scoring frames, group them into
+  clusters, then fit a step function inside each cluster's window to pinpoint the
+  exact event frame. The direction of the step is opposite between the two functions
+  (rise for fusion, drop for unbinding).
+
+  Both accept the smoothed trace as an optional argument. In Analyze_Trace_Data, the
+  smoothed trace computed by Seek_Fusion (sfSmoothed) and Seek_Unbounds (ubSmoothed)
+  is passed directly, avoiding a second Calculate_Sliding_Window call on the same data.
+
+  Both functions return frame indices in CLIPPED coordinates — [UPDATE] specifically,
+  the SAME ClipWidth-trimmed coordinate space that sfScore/ubScore and sfSmoothed/
+  ubSmoothed live in (since Find_Fusion_Frame/Find_Unbound_Frame are only ever called
+  here with that score/smoothed data — the `trace` argument they also accept is unused
+  whenever preSmoothed is supplied, which Analyze_Trace_Data.m always does). Analyze_Trace_Data
+  immediately converts them to global, picking up the extra +ClipWidth term:
+
+    fusionFramesGlobal  = fusionFramesClipped  + FrameNumFound + ClipWidth
+    unboundFramesGlobal = unboundFramesClipped + FrameNumFound + ClipWidth
+
+
+  ───────────────────────────────────────────────────────────────────────────────────────
+  PART 4A  —  FIND_FUSION_FRAME
+  ───────────────────────────────────────────────────────────────────────────────────────
+
+  PURPOSE:
+  Seek_Fusion identifies a cluster of score-31 frames centered on a fusion event, but
+  frame i scoring 31 means "the rise happens somewhere in the window [i, i+LookForward]"
+  — it is a pre-rise anchor, not the fusion frame itself. Find_Fusion_Frame searches
+  within that window to find the exact frame where the step up occurs.
+
+  STEP 1 — FIND HIGH-SCORING FRAMES:
+  All frames with score >= 31 are collected into a list.
+
+  STEP 2 — CLUSTER:
+  Consecutive high-scoring frames are grouped into clusters using the same
+  MinEventSeparation threshold as Analyze_Trace_Data (= LookForward = 15 frames).
+  Two frames belong to the same cluster if their gap is <= MinEventSeparation.
+  This ensures the number of clusters found here exactly matches the sfClusterCount
+  used for classification in the caller.
+
+  STEP 3 — STEP-FUNCTION FIT:
+  For each cluster, the search window is:
+
+    [clusterStart,  clusterStart + LookForward]
+
+  clusterStart is the first high-scoring frame in the cluster — the earliest pre-rise
+  anchor. The fusion frame must be somewhere in the next LookForward frames.
+
+  For each possible split point k within this window:
+
+    preMean  = mean( smoothed(clusterStart : k−1) )
+    postMean = mean( smoothed(k : windowEnd) )
+    stepHeight = postMean − preMean
+
+  The split point k that gives the maximum stepHeight is the fusion frame. This is
+  the step-function fit: it finds the frame that best divides the window into a low
+  pre-rise region and a high post-rise region.
+
+  OUTPUT:  [fusionFrames, clusterSizes, clusterFrames]
+    fusionFrames   — row vector of fusion frame indices in clipped coordinates,
+                     one per cluster (one for '1 Fuse', two for '2 Fuse').
+    clusterSizes   — row vector, one integer per cluster: number of score-31
+                     frames in that cluster. Used by H3 to flag weak-signal events.
+    clusterFrames  — cell array {1 × nClusters}: each cell holds a row vector of
+                     the clipped-coordinate indices of every score-31 frame in
+                     that cluster. e.g. {[271 272 273], [652 654 655]}.
+
+
+  ───────────────────────────────────────────────────────────────────────────────────────
+  PART 4B  —  FIND_UNBOUND_FRAME
+  ───────────────────────────────────────────────────────────────────────────────────────
+
+  PURPOSE:
+  Seek_Unbounds scores frame i as a drop detection meaning "the drop occurred somewhere
+  in the window [i−LookBack, i]" — frame i is the post-drop point. Find_Unbound_Frame
+  searches backward from each cluster to find the exact frame where the step down occurs.
+
+  STEP 1 — FIND HIGH-SCORING FRAMES:
+  All frames with score >= 15 are collected. (In practice, only score 15 is the
+  Unbound candidate score — see Part 2 — so this threshold collects all genuine
+  unbound candidate frames.)
+
+  STEP 2 — CLUSTER:
+  Same approach as Find_Fusion_Frame, using MinEventSeparation = LookBack = 8 frames
+  from Seek_Unbounds Options.
+
+  STEP 3 — STEP-FUNCTION FIT:
+  For each cluster, the search window is:
+
+    [clusterStart − LookBack,  clusterStart]
+
+  clusterStart is the first high-scoring frame. Because Seek_Unbounds scores at the
+  POST-drop frame (looking backward), the unbinding step happened somewhere in the
+  LookBack frames preceding it.
+
+  For each possible split point k within this window:
+
+    preMean  = mean( smoothed(windowStart : k−1) )
+    postMean = mean( smoothed(k : clusterStart) )
+    stepHeight = preMean − postMean
+
+  Note the subtraction is reversed compared to Find_Fusion_Frame (preMean − postMean
+  instead of postMean − preMean). The best k is the frame where the trace transitions
+  from high to low — the unbinding frame.
+
+  OUTPUT:  [unboundFrames, clusterSizes, clusterFrames]
+    unboundFrames  — row vector of unbinding frame indices in clipped coordinates,
+                     one per cluster.
+    clusterSizes   — row vector, one integer per cluster: number of score-15
+                     frames in that cluster.
+    clusterFrames  — cell array {1 × nClusters}: each cell holds a row vector of
+                     the clipped-coordinate indices of every score-15 frame in
+                     that cluster.
+
+
+  ───────────────────────────────────────────────────────────────────────────────────────
+  TIMING FIELDS
+  ───────────────────────────────────────────────────────────────────────────────────────
+
+  After finding fusion frames, Analyze_Trace_Data computes the timing fields that
+  Part D uses to build bind-to-fusion histograms:
+
+    standardBindFrameNum  =  FrameNumFound     (the pH drop frame — frame of acid addition)
+    standardBindTime      =  OtherDataToSave.VideoTimeVector(FrameNumFound)/(1000*60)
+                              (or file-level StandardBindTime — see full detail below)
+
+    bindToFusionNumFrames =  fuseFrameNumbers − standardBindFrameNum
+    bindToFusionTime      =  OtherDataToSave.VideoTimeVector(fuseFrameNumbers)/(1000*60)
+                              − standardBindTime
+
+  [UPDATE]: NOT tr.TimeVector (timeVec) — see the REFERENCE POINT section below for why
+  indexing timeVec directly with a global frame number is wrong (and can throw an
+  out-of-bounds error for events near the end of a trace).
+
+  These are stored in FusionData alongside the frame indices. Unbound traces do not
+  get timing fields computed (unbinding is not used in the bind-to-fusion histograms).
+
+
+
+
+==========================================================================================
+  PART 5  —  TIMING DATA  (step 5 in pipeline)
+==========================================================================================
+
+  After the fusion and unbound frames are localised, the pipeline computes three timing
+  fields that Part D uses to build bind-to-fusion histograms. These fields are only
+  populated for traces with at least one fusion frame; all other traces receive empty
+  arrays and Part D skips them.
+
+
+  ───────────────────────────────────────────────────────────────────────────────────────
+  THE REFERENCE POINT — standardBindFrameNum / standardBindTime
+  ───────────────────────────────────────────────────────────────────────────────────────
+
+  The bind-to-fusion measurement is the time elapsed from pH drop to fusion.
+  pH drop = the moment acid is applied = FrameNumFound. This is the zero point.
+
+    standardBindFrameNum  =  FrameNumFound   (in frames, global coords)
+
+  For the time equivalent, two sources are tried in order:
+
+    1.  fileStandardBindTime from OtherDataToSave.StandardBindTime, OR (if absent)
+        OtherImportedData.StandardBindTime — whichever field the Part A file has,
+        guarded against the placeholder value 0 (means "not set"). If present and
+        nonzero, used as the reference time for ALL traces in the file.
+
+    2.  [UPDATE] OtherDataToSave.VideoTimeVector(FrameNumFound) / (1000*60)
+        Per-trace fallback (in practice hit for every trace on real Program A output,
+        since that output doesn't set OtherDataToSave.StandardBindTime at the top
+        level). NOT tr.TimeVector(FrameNumFound) — timeVec is natively indexed
+        starting at GlobalStartAnalysisFrame (== FrameNumFound+1); the finding image
+        itself (global frame FrameNumFound) isn't present in it at all, so
+        timeVec(FrameNumFound) would read the wrong frame's time entirely, and the
+        matching bindToFusionTime computation (timeVec(fuseFrameNumbersGlobal)) would
+        throw an out-of-bounds error for any event near the end of the clip once the
+        +FrameNumFound+ClipWidth offset pushes the global frame number past
+        numel(timeVec). VideoTimeVector IS indexed by true raw/global frame number —
+        milliseconds, hence the /(1000*60) to match timeVec's own minutes.
+
+    standardBindTime  =  time in MINUTES at the pH drop frame
+
+  The file-level value is preferred because VideoTimeVector-derived timing can have
+  minor per-trace variation depending on how Part A handles acquisition timing. Using a
+  shared StandardBindTime ensures all traces in a file use the same reference.
+
+
+  ───────────────────────────────────────────────────────────────────────────────────────
+  THE THREE TIMING FIELDS
+  ───────────────────────────────────────────────────────────────────────────────────────
+
+  All three fields are vectors — one value per fusion event. A '1 Fuse' trace has one
+  element; a '2 Fuse' trace has two. fuseFrameNumbers are in global coordinates
+  (output of Find_Fusion_Frame converted by +FrameNumFound+ClipWidth — see Part 4).
+
+    fuseFrameNumbers
+        Global frame indices of each fusion event. Same as fusionFramesGlobal.
+        Stored redundantly in FusionData for direct access by Part D.
+
+    bindToFusionNumFrames  =  fuseFrameNumbers  −  standardBindFrameNum
+        Number of frames elapsed from pH drop to fusion. Integer, zero-referenced at
+        the pH drop. Part D uses this for frame-count histograms.
+
+    bindToFusionTime  =  OtherDataToSave.VideoTimeVector(fuseFrameNumbers)/(1000*60)  −  standardBindTime
+        [UPDATE] NOT TimeVector(fuseFrameNumbers) — see THE REFERENCE POINT above for
+        why indexing timeVec with a global frame number is wrong (and can throw an
+        out-of-bounds error). Elapsed time in MINUTES (not seconds) from pH drop to
+        fusion -- Part A's Create_Video_Matrix_Auto_Time_Vector.m converts ms -> minutes
+        before this ever reaches Part B; VideoTimeVector itself stays in milliseconds,
+        hence the /(1000*60) here to match.
+
+    pHtoFusionTime  —  REMOVED. Used to just mirror bindToFusionTime with no
+        separate pH-relative calculation. This lab's experiments always set
+        Options.FusionTrigger = 'Binding' in Part D, never 'pH', so the field had
+        no consumer and was deleted. If a pH-triggered dataset is ever analyzed,
+        this field would need a real calculation, not just a recreated alias.
+
+
+  ───────────────────────────────────────────────────────────────────────────────────────
+  NON-FUSION TRACES
+  ───────────────────────────────────────────────────────────────────────────────────────
+
+  When sfClusterCount == 0 (No Fusion, Unbound, Other without fusion):
+
+    fuseFrameNumbers      = []
+    bindToFusionNumFrames = []
+    bindToFusionTime      = []
+
+  Empty arrays are stored in FusionData. Part D checks for empty before computing
+  statistics and skips those traces.
+
+
+
+
+==========================================================================================
+  PART 6  —  LANDING DETECTION  [DISABLED]
+==========================================================================================
+
+  Landing detection is not implemented in the current pipeline.
+
+  A landing event is a transient particle binding event that produces a fluorescence
+  hump mimicking fusion — a diffusing bright particle briefly contacts the membrane,
+  causes an intensity rise, then detaches and returns to baseline. Distinguishing this
+  from real fusion requires a confirmed return to pre-event intensity levels.
+
+  WHY IT IS DISABLED:
+  Insufficient ground-truth data. Building and validating a reliable detector requires
+  a large set of confirmed landing examples. Until that dataset exists, the landing
+  check is a stub.
+
+  CURRENT BEHAVIOUR:
+    landingData = struct()   — always an empty struct
+    LandingDetected = false  — Classify_Trace always sees no landing
+    No IsLandingCandidate or LandingData fields are saved in the output struct.
+
+  EFFECT ON CLASSIFICATION:
+  Rule 1 in Classify_Trace (landing override → 'Other') never fires.
+  Traces that are actually landings will be misclassified as '1 Fuse' or '2 Fuse'
+  and should be caught during Part C human review (they will typically appear as
+  High priority via H3 small-cluster or H2b focus-proximity flags).
+
+
+
+
+==========================================================================================
+  PART 7  —  CLASSIFY TRACE
+==========================================================================================
+
+  After all detection algorithms have run, Classify_Trace combines the cluster counts
+  from Seek_Fusion and Seek_Unbounds (and the landing flag, currently does not exist) into
+  a single designation string. This is the final algorithmic classification for the trace.
+
+
+  ───────────────────────────────────────────────────────────────────────────────────────
+  INPUTS
+  ───────────────────────────────────────────────────────────────────────────────────────
+
+    ubClusterCount  —  number of Seek_Unbounds score-15 clusters (integer ≥ 0)
+    sfClusterCount  —  number of Seek_Fusion score-31 clusters   (integer ≥ 0)
+    landingData     —  struct from landing detection; always empty struct (disabled)
+
+
+  ───────────────────────────────────────────────────────────────────────────────────────
+  CLASSIFICATION RULES  (evaluated in priority order — first match wins)
+  ───────────────────────────────────────────────────────────────────────────────────────
+
+    Priority  Condition                                       Designation
+    ────────  ──────────────────────────────────────────────  ───────────
+       1      Landing detected (always false — disabled)      'Other'
+       2      ubClusterCount > 1                              'Other'
+       3      sfClusterCount >= 1  AND  ubClusterCount >= 1  'Other'
+       4      ubClusterCount == 1  (no fusion clusters)       'Unbound'
+       5      sfClusterCount == 1  (no unbound clusters)      '1 Fuse'
+       6      sfClusterCount == 2  (no unbound clusters)      '2 Fuse'
+       7      sfClusterCount > 2   (no unbound clusters)      'Other'
+       8      Default (nothing found)                         'No Fusion'
+
+  RATIONALE FOR 'OTHER':
+  'Other' marks traces that are ambiguous and require human review. The three triggers
+  are: (1) landing event detected; (2) multiple unbinding events, which is biologically
+  implausible and suggests noise or a complex artefact; (3) a trace showing both fusion
+  and unbinding — the two events are mutually exclusive in a well-behaved recording.
+  Three or more fusion clusters are also flagged as 'Other' rather than '3 Fuse'
+  because three distinct fusion events on a single virion is not a recognised outcome.
+
+  NOTE ON DOWNSTREAM REVIEW:
+  The designation written here is NOT final. Part C presents the trace to a human
+  reviewer who can correct it. The field is stored as .Designation at the top level
+  and mirrored inside .FusionData.Designation. Part C reads .FusionData.Designation
+  as the primary field and updates both when a correction is made.
+
+
+
+
+==========================================================================================
+  PART 8  —  ASSIGN REVIEW PRIORITY
+==========================================================================================
+
+  After classification, Assign_Review_Priority assigns each trace a review priority:
+  Low, Medium, or High. This controls the order in which Part C presents traces to the
+  human reviewer.
+
+  Priority assignment uses a three-pass system. Priority can only go UP — it can never
+  be lowered once raised.
+
+  The full rule logic is documented in detail in the developer quick reference. Below
+  is a summary of the three passes.
+
+
+  ───────────────────────────────────────────────────────────────────────────────────────
+  PASS 1  —  DEFAULT
+  ───────────────────────────────────────────────────────────────────────────────────────
+
+  Every trace starts as Low. No exceptions.
+
+
+  ───────────────────────────────────────────────────────────────────────────────────────
+  PASS 2  —  RAISE TO MEDIUM
+  ───────────────────────────────────────────────────────────────────────────────────────
+
+  Any trace with a positive event designation is raised to Medium:
+
+    '1 Fuse', '2 Fuse', 'Unbound'  →  Medium
+
+  'No Fusion' and 'Other' remain Low after Pass 2.
+
+  Rationale: positive event traces always warrant a look. The human reviewer confirms
+  or corrects the designation, and fusion-frame timing is only trustworthy once reviewed.
+
+
+  ───────────────────────────────────────────────────────────────────────────────────────
+  PASS 3  —  RAISE TO HIGH  (ordered rules, first match wins)
+  ───────────────────────────────────────────────────────────────────────────────────────
+
+  H1  —  Event frame near trace edge
+          Applies to: '1 Fuse', '2 Fuse', 'Unbound'
+          Condition:  any fusion or unbound frame falls within BoundaryZone (20) frames
+                      of the start or end of the clipped trace.
+          Concern:    events at the edge have insufficient pre- or post-event baseline
+                      for confident classification.
+
+  H2a —  No Fusion trace with T5 focus-vetoed frame
+          Applies to: 'No Fusion'
+          Condition:  any(sfData.ScoreArray == 15) — a frame passed T1+T2+T3+T4 but
+                      the focus veto (T5) was the only thing preventing score 31.
+          Concern:    the trace would have been classified as fusion if not for a focus
+                      event; the veto may be a false positive.
+
+  H2b —  Fuse trace with focus event near fusion frame
+          Applies to: '1 Fuse', '2 Fuse'
+          Condition:  any focusClipped index within FocusProximityWindow (2) frames of
+                      any fusion frame (sfData.FuseFramesClipped).
+          Concern:    a focus artifact may have influenced fusion frame timing even
+                      though T5 did not veto the candidate.
+
+  H3  —  Fuse trace with a small score-31 cluster
+          Applies to: '1 Fuse', '2 Fuse'
+          Condition:  any cluster in sfData.ClusterSizes is ≤ MaxSmallClusterSize (3).
+          Concern:    a short cluster (only 1–3 frames scored 31) is more consistent
+                      with a coincidental noise spike than a genuine fusion event.
+                      ~40% of false positives have cluster size ≤ 3 vs ~10% of true fusions.
+
+  H4  —  No Fusion trace with a one-test-failure near-miss
+          Applies to: 'No Fusion'
+          Condition:  any frame in sfData.ScoreArray is in {23, 27, 29} (SeekFusion
+                      one-test failures) OR any qualifying frame in ubData.ScoreArray
+                      is in {7, 11, 13} (SeekUnbounds one-test failures).
+          Concern:    a single test failure prevented classification — a borderline
+                      threshold may be causing a genuine event to be missed.
+
+          SPECIAL RULE FOR UB SCORE 11 (T3 failed — sustained floor):
+          Score-11 frames are subject to an additional filter before they can trigger H4.
+          Seek_Unbounds now reports t3ViolationCount: the number of frames in the
+          FloorLength window that exceeded postDropCeiling. A score-11 frame is only
+          counted as a near-miss if:
+              t3ViolationCount(frame) <= H4.UB_T3MaxViolations  (default: 25)
+          Score-11 frames with more violations are excluded — they failed T3 by too
+          wide a margin to be considered genuine near-misses.
+          Parameter: Parameters_Assign_Review_Priority → Options.H4.UB_T3MaxViolations
+
+  H5  —  Designation is 'Other'
+          Applies to: 'Other'
+          Condition:  designation == 'Other'.
+          Concern:    'Other' is inherently ambiguous and always needs human resolution.
+
+  WHAT IS RECORDED:
+  Assign_Review_Priority returns two values:
+    reviewPriority      —  string: 'Low', 'Medium', or 'High'
+    reviewPriorityData  —  struct recording which rule fired (.Pass, .Rule, .Reason)
+                           plus rule-specific fields (trigger frames, cluster sizes, etc.)
+  Both are saved in the output struct.
+
+
+
+
+==========================================================================================
+  PART 9  —  BUILD OUTPUT STRUCT
+==========================================================================================
+
+  The final step inside the per-trace loop assembles all computed results into a single
+  output struct that is appended to AnalyzedTraceData.
+
+
+  ───────────────────────────────────────────────────────────────────────────────────────
+  PASSTHROUGH BASE
+  ───────────────────────────────────────────────────────────────────────────────────────
+
+  The output struct begins as a copy of the input trace struct:
+
+    out = tr
+
+  This passes all Part A fields through unchanged — Trace_BackSub, TimeVector,
+  Coordinates, Eccentricity, Area, FullFilePath, StreamFilename, BoxAroundVirus,
+  VirusIDNumber, BindingTime, FocusFrameNumbers_Shifted, IgnoreFrameNumbers_Shifted,
+  IsVirusGood, ReasonVirusFailed, and any others.
+
+  [UPDATE]: FrameNumFound is deliberately NOT in that passthrough list — tr never has
+  this field (see Part 0's [UPDATE] note). It's added explicitly right after the `out = tr`
+  copy: `out.FrameNumFound = fs;`, using the file-level value read once at the top of
+  Analyze_Trace_Data.m. Functionally the output still has .FrameNumFound per trace, same
+  as always — it's just synthesized rather than genuinely passed through.
+
+  Part B fields are then written on top of this base. If a Part B field name clashes
+  with a Part A field (which should not happen in normal use), the Part B value wins.
+
+
+  ───────────────────────────────────────────────────────────────────────────────────────
+  TOP-LEVEL FIELDS WRITTEN BY PART B
+  ───────────────────────────────────────────────────────────────────────────────────────
+
+  .Designation         —  '1 Fuse' / '2 Fuse' / 'Unbound' / 'No Fusion' / 'Other'
+                          Set by Classify_Trace. Mirrors FusionData.Designation.
+                          This is the field Part C displays and may correct.
+
+  .ChangedByUser       —  'Not analyzed'
+                          Initialised here. Part C updates it to 'Reviewed By User',
+                          'Reviewed, Fuse frame chosen by user', etc.
+
+  .Review_Priority     —  'Low' / 'Medium' / 'High'
+                          Set by Assign_Review_Priority.
+
+  .Review_PriorityData —  Struct: .Pass (1/2/3), .Rule ('H1'–'H5'), .Reason (string),
+                          plus rule-specific diagnostic fields (trigger frames, etc.).
+
+  ───────────────────────────────────────────────────────────────────────────────────────
+  FUSIONDATA SUB-STRUCT  (required by Parts C, D, E)
+  ───────────────────────────────────────────────────────────────────────────────────────
+
+  FusionData is a dedicated sub-struct containing only the fields that downstream
+  Parts C, D, and E access by name. Keeping these separate from the full diagnostics
+  means Parts C/D/E do not need to know about SeekFusion internals.
+
+  .FusionData.Designation           —  Same as top-level .Designation. This is the
+                                       primary field read by Part C/D/E. Part C may
+                                       update it independently of the top-level field.
+
+  .FusionData.FuseFrameNumbers      —  Global frame indices of each fusion event
+                                       (one element per fusion cluster).
+                                       Empty [] for non-fusion traces.
+
+  .FusionData.BindtoFusionNumFrames —  [UPDATE] REMOVED. FuseFrameNumbers − FrameNumFound, a
+                                       frame-count difference with no known consumer -- only
+                                       the TIME value below actually matters (e.g. Part D's
+                                       CDF plots). Still computed internally and kept on
+                                       SeekFusionData.BindtoFusionNumFrames (frozen record);
+                                       only the duplicate on this live, reviewer-editable
+                                       struct was removed.
+
+  .FusionData.BindtoFusionTime      —  [UPDATE] VideoTimeVector(FuseFrameNumbers)/(1000*60)
+                                       − standardBindTime. NOT TimeVector(FuseFrameNumbers)
+                                       — see Part 5's REFERENCE POINT section for why.
+                                       Elapsed time in MINUTES (not seconds) from pH drop
+                                       to each fusion. This is the value Part D plots on
+                                       its CDF x-axis. Empty [] for non-fusion traces.
+
+  .FusionData.pHtoFusionTime        —  REMOVED. Used to just mirror BindtoFusionTime with
+                                       no separate calculation; this lab's experiments never
+                                       set Part D's Options.FusionTrigger to 'pH', so it had
+                                       no consumer.
+
+  .FusionData.StandardBindFrameNum  —  [UPDATE] REMOVED. Was = FrameNumFound, a pure
+                                       duplicate of the already-present top-level
+                                       .FrameNumFound field, so it carried no independent
+                                       value. Use the top-level field instead.
+
+
+  ───────────────────────────────────────────────────────────────────────────────────────
+  FULL DIAGNOSTICS — TOP-LEVEL STRUCTS
+  ───────────────────────────────────────────────────────────────────────────────────────
+
+  [UPDATE]: .ScoreArray/.DiffTrace/.FracTrace/.T5Ratio/.SmoothedTrace below are now
+  ClipWidth-trimmed (10 frames shorter than clip; see Part 2/3's ClipWidth notes), and
+  .FuseFramesClipped/.UnboundFramesClipped are indexed in that SAME trimmed space —
+  NOT plain clip coordinates. The +FrameNumFound conversions below have picked up an
+  extra +ClipWidth accordingly (see Part 4).
+
+  .SeekFusionData   —  The complete sfData struct. Contains everything Seek_Fusion and
+                       Find_Fusion_Frame computed for this trace:
+                         .ScoreArray          per-frame score (0–31), ClipWidth-trimmed length
+                         .DiffTrace           T1 forward difference at each frame
+                         .FracTrace           T2 fractional rise at each frame
+                         .T5Ratio             T5 focus-jump ratio at each frame
+                         .SmoothedTrace       width-25 median-smoothed trace, ClipWidth-trimmed
+                         .FusionClusterCount  number of score-31 clusters
+                         .ClusterSizes        [1×n] frames per cluster
+                         .ClusterFrames       {1×n} cell: score-31 frame indices per cluster
+                         .FuseFramesClipped   step-fit fusion frames (ClipWidth-trimmed coords)
+                         .FuseFramesGlobal    FuseFramesClipped + FrameNumFound + ClipWidth
+                         .Options             sfOpts used for this trace
+                         .BindtoFusionNumFrames  FuseFramesGlobal − FrameNumFound (frozen;
+                                                 one value per fuse frame)
+                         .BindtoFusionTime       VideoTimeVector-based, MINUTES (frozen) —
+                                                 same fix as FusionData.BindtoFusionTime above
+
+  .SeekUnboundsData —  The complete ubData struct. Contains everything Seek_Unbounds and
+                       Find_Unbound_Frame computed for this trace:
+                         .ScoreArray          per-frame score (0–15), ClipWidth-trimmed length
+                         .DiffTrace           T1 lookback difference at each frame
+                         .FracTrace           T2 fractional drop at each frame
+                         .SmoothedTrace       width-3 median-smoothed trace, ClipWidth-trimmed
+                         .UnboundClusterCount number of score-15 clusters
+                         .ClusterSizes        [1×n] frames per cluster
+                         .ClusterFrames       {1×n} cell: score-15 frame indices per cluster
+                         .UnboundFramesClipped step-fit unbound frames (ClipWidth-trimmed coords)
+                         .UnboundFramesGlobal  UnboundFramesClipped + FrameNumFound + ClipWidth
+                         .Options             ubOpts used for this trace
+                         .BindtoUnboundNumFrames UnboundFramesGlobal − FrameNumFound (frozen;
+                                                 empty if no unbind detected)
+                         .BindtoUnboundTime      VideoTimeVector-based, MINUTES (frozen)
+
+
+  ───────────────────────────────────────────────────────────────────────────────────────
+  ACCUMULATION
+  ───────────────────────────────────────────────────────────────────────────────────────
+
+  After the output struct is built, it is appended to the AnalyzedTraceData array:
+
+    if isempty(AnalyzedTraceData)
+        AnalyzedTraceData = out;
+    else
+        AnalyzedTraceData(end+1) = out;
+    end
+
+  The first trace initialises the array (avoids MATLAB struct-array type mismatch on
+  the first iteration). Every subsequent trace is appended to the end. At the end of
+  the loop, AnalyzedTraceData is a struct array with one element per processed trace.
+
+  Progress is printed to the console every 100 traces.
+
+
+
+
+==========================================================================================
+  SAVE  —  POST-LOOP
+==========================================================================================
+
+  After all traces have been processed, the pipeline packages everything into
+  DataToSave and writes it to disk.
+
+  [UPDATE, post Part-A OtherDataToSave restructure]: UniversalData (previously built
+  here and saved as DataToSave.OtherDataToSave.UniversalData) has been REMOVED — its
+  contents were stale/incorrect. Part C previously read UniversalData to determine
+  whether to skip focus correction and ignore-frame removal; that signal is no longer
+  provided by this pipeline's output, so revisit Part C compatibility if that turns
+  out to matter.
+
+
+  ───────────────────────────────────────────────────────────────────────────────────────
+  DATATOSAVE STRUCT
+  ───────────────────────────────────────────────────────────────────────────────────────
+
+  Everything is packaged into a single DataToSave struct before saving:
+
+    DataToSave.CombinedAnalyzedTraceData                  —  the AnalyzedTraceData struct
+                                                             array (one element per trace)
+    DataToSave.OtherDataToSave.ClipWidth                  —  this run's shared Seek_Fusion/
+                                                             Seek_Unbounds dead-zone width
+    DataToSave.OtherDataToSave.EffectiveDeadTime          —  MINUTES; real-world time of the
+                                                             first global video frame actually
+                                                             scored, i.e.
+                                                             VideoTimeVector(GlobalStartAnalysisFrame
+                                                             + ClipWidth)/(1000*60). NaN for
+                                                             old-format Part A files missing
+                                                             GlobalStartAnalysisFrame/VideoTimeVector.
+    DataToSave.OtherDataToSave.SeekFusionParameters       —  sfOpts used for this run
+    DataToSave.OtherDataToSave.SeekUnboundsParameters     —  ubOpts used for this run
+    DataToSave.OtherDataToSave.ReviewPriorityParameters   —  Assign_Review_Priority_Options
+                                                             used for this run
+    DataToSave.OtherDataToSave.<...Part A fields...>      —  exact copy-through of every field
+                                                             Part A saved under its own
+                                                             OtherDataToSave (GlobalTimeZeroFrame,
+                                                             GlobalFindingImageFrame,
+                                                             GlobalStartAnalysisFrame, FindingImage,
+                                                             GlobalFocusFrameNumbers, XYOffsets,
+                                                             ThresholdsUsed, RoughBackground,
+                                                             TotalVideoIntensity,
+                                                             AverageVideoIntensity, VideoTimeVector,
+                                                             Options), field order preserved
+
+  This structure is compatible with Bob's Part C, D, and E scripts via
+  DataToSave.CombinedAnalyzedTraceData (see the UPDATE note above re: UniversalData).
+
+
+  ───────────────────────────────────────────────────────────────────────────────────────
+  SAVE PATH DERIVATION
+  ───────────────────────────────────────────────────────────────────────────────────────
+
+  The output filename and folder are derived automatically from the input file path.
+  No user input is required at save time.
+
+  FILENAME:
+  The input filename is expected to end with '_ExtractedTraces' (the Part A naming
+  convention). That suffix is stripped and replaced with '-AnalyzedTraces':
+
+    InputName_ExtractedTraces.mat  →  InputName-AnalyzedTraces.mat
+
+  If the '_ExtractedTraces' suffix is not found (non-standard input filename), the
+  label is simply 'InputName-AnalyzedTraces'.
+
+  FOLDER:
+  Part A saves extracted trace files one level inside the experiment folder:
+
+    ExptFolder/Traces/InputName_ExtractedTraces.mat
+
+  Part B saves one level up, into a sibling Analysis/ folder:
+
+    ExptFolder/Analysis/InputName-AnalyzedTraces.mat
+
+  The Analysis/ folder is created automatically if it does not already exist.
+
+  The full save path is printed to the console in the summary.
+
+
+
+
+==========================================================================================
+  [NEW] DISPLAY  —  FINDING IMAGE WITH BOXES  (runs after SAVE, before SUMMARY)
+==========================================================================================
+
+  Right after the .mat file is saved (and before the console summary prints),
+  Analyze_Trace_Data.m opens a figure via Display_All_Analyzed_Viruses.m: the finding
+  image (raw.OtherDataToSave.FindingImage) is shown with imshow, and a colored box is
+  drawn around every analyzed trace using AnalyzedTraceData(i).BoxAroundVirus
+  (.Top/.Bottom/.Left/.Right — Part A's Find_And_Analyze_Particles.m field, passed
+  through into the output struct unchanged).
+
+  Adapted from Bob's function of the same name (Fusion Analysis (26.0)/B) Lipid Mixing
+  Trace Analysis/Display_All_Analyzed_Viruses.m). Bob's version drove a live GUI figure
+  via FigureHandles.ImageWindow and read each trace's outline from a pre-computed
+  AnalyzedTraceData(i).BoxCoords (an Nx2 closed polygon). This pipeline has no GUI
+  figure-handle plumbing and doesn't produce BoxCoords, so this version opens its own
+  plain figure() and builds the box polygon on the fly from .BoxAroundVirus instead.
+
+  Box color by Designation:  '1 Fuse' green, '2 Fuse' blue (new — Bob's pipeline had no
+  '2 Fuse' category), 'Unbound' yellow, 'No Fusion' red, everything else ('Other') magenta.
+
+  minImageShow/maxImageShow (imshow intensity scaling) and the title's frame number are
+  read from raw.OtherDataToSave.Options if present, else fall back to Part A's own
+  defaults (400/800, Setup_Options_Extract_Traces.m) and fs (the same file-level
+  FrameNumFound value used throughout, not a per-trace field). If
+  raw.OtherDataToSave.FindingImage isn't present at all, the figure is skipped with a
+  console warning instead of erroring — this is purely a diagnostic aid, not required
+  for the saved .mat output.
+
+  This is a plain, non-blocking figure() call — it doesn't halt scripted/automated
+  invocations of Analyze_Trace_Data, but a window will pop up.
+
+
+
+
+==========================================================================================
+  SUMMARY  —  END OF RUN
+==========================================================================================
+
+  After saving, Analyze_Trace_Data prints a summary to the MATLAB console:
+
+    ====================================
+    Analyze_Trace_Data complete.
+      Total:      <N>
+      1 Fuse:     <n>  (X.X%)
+      2 Fuse:     <n>  (X.X%)
+      No Fusion:  <n>  (X.X%)
+      Unbound:    <n>  (X.X%)
+      Other:      <n>  (X.X%)
+
+      Review Priority:
+        High:     <n>  (X.X%)
+        Medium:   <n>  (X.X%)
+        Low:      <n>  (X.X%)
+      Saved to: <full path>
+    ====================================
+
+  All percentages are relative to Total (traces that were processed; skipped traces
+  with IsVirusGood ~= 'y' are not included in any count).
+
+  The save path on the last line is the full absolute path of the output .mat file.
+
+
+

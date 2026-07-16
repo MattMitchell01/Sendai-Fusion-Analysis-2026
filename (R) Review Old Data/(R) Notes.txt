@@ -1,0 +1,110 @@
+
+==========================================================================================
+                          REVIEW OLD DATA  —  PIPELINE NOTES
+                   Rawle Lab  ·  Williams College  ·  Matthew D. Mitchell
+==========================================================================================
+
+  Plain-language overview of Part R for lab members. Part R is entirely new work by
+  Matthew D. Mitchell, Rawle Lab, Williams College, 2026. It builds on the original pipeline
+  by Bob Rawle (Kasson Lab, UVA, 2016; Rawle et al., Biophysical Journal 2016).
+
+
+==========================================================================================
+  WHAT THIS PART DOES  (and why it exists)
+==========================================================================================
+
+  Part R lets us re-run OLD datasets — ones analyzed years ago under Bob's original pipeline
+  and hand-reviewed back then — through the CURRENT, UNMODIFIED Part B and Part C, and flag
+  every trace where today's algorithm disagrees with the old human review.
+
+  Why: it gives us a large pool of already-ground-truthed data to grade the new Part B
+  against, without a reviewer having to re-review thousands of traces — they only look at the
+  disagreements, sorted into the same Low/Medium/High + H1–H5 categories as a live run.
+
+  Crucially, Part R does NOT modify Part B's algorithm or Part C's core review loop. It only
+  reshapes legacy INPUT into the format current Part B already expects, and adds a small,
+  additive "Review Old Data Mode" to Part C. That is what keeps the output automatically
+  compatible with Part D.
+
+
+==========================================================================================
+  HOW TO RUN  (typical workflow)
+==========================================================================================
+
+  1. Run Run_Part_R_Driver() and pick the experiment folder (the one directly containing
+     Traces/ and Analysis/). This restructures the folder ONCE (see below), then asks you to
+     pick, one at a time:
+        · the video's raw legacy Traces file (now in "Old Traces/")
+        · its matching Old User Review File (now in "Old Analysis/AnalysisReviewed/";
+          Cancel if there isn't one)
+     It then runs Convert -> Part B -> Flag for that one video and prints its agreement rate.
+
+  2. The result is a normal New-B output file in Analysis/, already flagged with
+     .IsLegacyDisagreement on every trace.
+
+  3. Open that file in Part C (An_Easy_Start_UserReview.m). Set, in Setup_Options_User_Review.m:
+        Options.ReviewOldDataMode = 'y'
+        Options.ReviewOldDataOnlyDifferences = 'y'
+     and review only the disagreements. The resulting …-Revd.mat flows into Part D unmodified.
+
+  Nothing is auto-searched or auto-matched — you pick each file yourself, one video at a time.
+
+
+==========================================================================================
+  FOLDER RESTRUCTURING  (happens once, automatically)
+==========================================================================================
+
+  The first time Run_Part_R_Driver runs against an experiment folder it separates old from
+  new so they can never be confused:
+
+     Old Traces/     <- the original raw legacy Program A output (renamed, untouched)
+     Traces/         <- the CONVERTED file(s) only (created lazily on first save)
+     Old Analysis/   <- the original legacy AnalysisReviewed/ ground truth (renamed, untouched)
+     Analysis/       <- the NEW Part B output only (created by Part B when it runs)
+
+  This is a one-time operation. If "Old Traces/" or "Old Analysis/" already exists, the driver
+  errors out loudly rather than restructuring twice.
+
+
+==========================================================================================
+  THE THREE PIECES
+==========================================================================================
+
+  Convert_Legacy_ProgramA_Output.m
+      Converts one legacy Traces .mat from the OLD frame-indexing convention into the format
+      current Part B expects. The legacy convention differs: in old files, Trace_BackSub's
+      index 1 IS the finding-image frame (current Part B assumes index 1 is one frame later),
+      and the focus-frame shift formula is different. The converter RE-VALIDATES both of these
+      assumptions on every file and errors loudly rather than silently mis-converting. It
+      writes only to an explicit output folder, never back where it read from.
+
+  Analyze_Trace_Data.m  (Part B — used as-is)
+      The unmodified current classifier runs on the converted file.
+
+  Flag_Legacy_Disagreements.m
+      Compares each trace's frozen .AlgoDesignation (the new algorithm's pre-review call)
+      against the old human review's .Designation, matched by VirusIDNumber. Adds
+      .IsLegacyDisagreement and .LegacyComparison to every trace, prints an overall
+      agree/disagree percentage, and re-saves the file in place.
+
+
+==========================================================================================
+  THINGS TO KNOW
+==========================================================================================
+
+  · The old 'Slow' designation.  Old reviews used a 'Slow' label that current Part B has no
+    equivalent for. This needs no special handling: since new Part B can never output 'Slow',
+    every legacy 'Slow' trace automatically counts as a disagreement and is routed to a human
+    to assign a real new-schema label. Part D already has a native 'Slow' counter, so nothing
+    downstream breaks.
+
+  · Review Old Data Mode (Part C).  Two new options, both default 'n' so live sessions are
+    unaffected. ReviewOldDataMode='y' stops a legacy session from writing into the shared
+    cross-dataset tracking files (Performance_Log / Key_Traces_Collection).
+    ReviewOldDataOnlyDifferences='y' queues only the flagged disagreements — excluded traces
+    are appended to a trailing "NotInReviewScope" segment, never dropped.
+
+  · Legacy datasets live outside this repo, under
+    /Users/littlem/Research/analysis/Lisa & Carol Corr. Datasets/<Experimenter>/<Dataset>/.
+
+==========================================================================================

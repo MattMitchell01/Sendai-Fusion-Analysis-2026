@@ -1,0 +1,136 @@
+
+==========================================================================================
+                        USER REVIEW TRACES  —  PIPELINE NOTES
+                   Rawle Lab  ·  Williams College  ·  Matthew D. Mitchell
+==========================================================================================
+
+  Plain-language overview of Part C for lab members — the friendlier companion to the
+  detailed, blow-by-blow developer design record kept separately for this part.
+  New Part C by Matthew D. Mitchell, Rawle Lab, Williams College, 2026, built to work with
+  the new Part B classifier. Original Part C by Bob Rawle is preserved untouched in
+  "z. Reference C) User Review Traces/" for workflow reference only.
+
+
+==========================================================================================
+  WHAT THIS PART DOES
+==========================================================================================
+
+  Part C is the HUMAN-IN-THE-LOOP step. Part B has already classified every trace; Part C
+  shows those traces to a reviewer, lets them confirm or correct the algorithm's call, and
+  writes the corrected labels back out. Those corrected labels are what become ground-truth
+  keys used to grade and improve Part B.
+
+  Input:   a Part B output .mat  (…-AnalyzedTraces.mat)
+  Output:  a reviewed .mat in User_Revd_Analysis/  (…-Revd.mat) — flows straight into Part D.
+
+
+==========================================================================================
+  HOW TO RUN
+==========================================================================================
+
+  1. Check Setup_Options_User_Review.m (grid sizes, whether wait-time picking is on, etc.).
+  2. Run An_Easy_Start_UserReview.m — it opens a file picker for the Part B output file.
+  3. Review traces batch by batch (see "The review model" below). Progress is saved after
+     every round, so a session can be interrupted and resumed safely.
+
+
+==========================================================================================
+  THE REVIEW MODEL — three tiers, reviewed in order
+==========================================================================================
+
+  Instead of walking traces in file order, Part B pre-sorts them by how much attention they
+  need (Review_Priority + which rule fired), and Part C reviews them in that order:
+
+     LOW      one big pool of confident, unremarkable traces        (20 per screen, 5x4)
+     MEDIUM   split by designation: 1 Fuse -> 2 Fuse -> Unbound     (15 per screen, 5x3)
+     HIGH     split by rule: H1 -> H2a -> H2b -> H3 -> H4 -> H5     (custom grids)
+
+  The High tier is where the algorithm was least sure. Each High subgroup gets a
+  situation-specific diagnostic overlay so the reviewer can see WHY it was flagged:
+
+     H1   event happened near the very start/end of the trace  -> a two-row layout with a
+          full-trace view on top and a zoomed edge view below
+     H2a  a near-miss fusion that was vetoed only because a focus event was too close
+     H2b  a real fusion that had a focus event nearby
+     H3   a fusion built from a suspiciously small cluster of frames
+     H4   a near-miss that failed exactly one internal test (the title says which one)
+     H5   "Other" — the ambiguous catch-all
+
+  H2a/H2b/H3/H4/H5 all draw every focus event on the trace as a red-before / black-on /
+  blue-after dot triple, so the reviewer sees the same focus context the algorithm saw.
+
+
+==========================================================================================
+  HOW YOU CORRECT A TRACE — the code system
+==========================================================================================
+
+  Each screen shows a numbered grid of traces. To flag ones the algorithm got wrong, you
+  type "PlotNumber.Code" pairs at the console (e.g. "5.3, 9.1"). Empty = everything on this
+  screen is correct. The codes:
+
+     .0    No Fusion
+     .1    1 Fuse            .11   1 Fuse designation is right, but re-pick the fusion frame
+     .2    2 Fuse            .22   2 Fuse designation is right, but re-pick the frames
+     .3    Unbound           .33   Unbound designation is right, but re-pick the unbind frame
+     .9    Hard to classify / ignore
+
+  The re-pick codes are just each fresh code's digit doubled (.1->.11, .2->.22, .3->.33) —
+  one easy rule instead of arbitrary suffixes. When a code needs a frame (a fusion or unbind
+  moment), a blown-up single-trace figure opens and you click the true frame; the picked
+  frame is stored in GLOBAL coordinates so downstream keys line up.
+
+  Every correction stamps a ChangedByUser note so you always know what a reviewer did.
+
+
+==========================================================================================
+  KEY DESIGN RULES (so corrections stay trustworthy)
+==========================================================================================
+
+  · The algorithm's ORIGINAL call is frozen and never overwritten.  AlgoDesignation (top
+    level) and the whole SeekFusionData / SeekUnboundsData structs are never written to by
+    Part C. Your corrections go into the LIVE fields (Designation, FusionData, UnboundData).
+    That means Part B can always be graded against what a human actually found, even after
+    the designation has been corrected away from it.
+
+  · Global vs clipped frames.  The plotted trace is "clipped" (the finding image is excluded).
+    Stored fusion/unbind frames are GLOBAL. Part C converts between them every time it draws
+    a marker or writes back a picked frame — see the design notes on frame coordinates for
+    the exact formula. Storing a clipped value into a global field would silently corrupt ground truth.
+
+  · Time is in MINUTES.  TimeVector and the Bindto…Time fields are already minutes (Part A
+    converts from ms). The on-screen wait-time labels say "min".
+
+  · Tier-agnostic code.  The plotting/correction functions don't branch on tier; the one
+    place that dispatches per-subgroup is Process_Review_Segment inside Start_User_Review.m.
+
+
+==========================================================================================
+  END-OF-SESSION TRACKING (across datasets)
+==========================================================================================
+
+  At the end of a session Part C can (optionally) harvest "key traces" into a shared
+  Key_Traces_Collection.mat and update a cumulative true-positive / false-negative /
+  false-positive tally in Performance_Log.mat, both kept in the master analysis folder.
+  These let Part B's accuracy be tracked over time across many reviewed datasets.
+
+
+==========================================================================================
+  THE FILES
+==========================================================================================
+
+  Entry / loop:   An_Easy_Start_UserReview, Start_User_Review, Setup_Options_User_Review,
+                  Build_Review_Queue, Resolve_Grid_Config, Get_User_Review_File_Path,
+                  Save_User_Review_File
+  Plotting:       Create_Master_Window, Plot_Current_Trace, Plot_Trace_Pair_H1,
+                  Plot_Trace_With_Focus_Markers, Plot_Focus_Dot_Markers,
+                  Display_Reviewed_Viruses, tight_subplot
+  Corrections:    Correct_Designations, Get_Designation_Code_Table, Parse_Designation_Code,
+                  Apply_Designation_Code, Fix_Fusion_Wait_Time, Fix_Unbind_Wait_Time,
+                  Clip_Trace_For_Review, Get_H2_Focus_Jump_Trigger_Frame,
+                  Get_H4_Failed_Test_Label, Run_Med
+  Reporting:      Print_Designation_Summary, Update_Performance_Log,
+                  Extract_Future_Key_Traces, Cleanup_Key_Traces_Collection
+  Reference only: everything under "z. Reference C) User Review Traces/" (Bob's original,
+                  do not wire up to new Part B).
+
+==========================================================================================

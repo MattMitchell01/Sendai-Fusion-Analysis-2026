@@ -1,0 +1,100 @@
+
+==========================================================================================
+                        COMPILE CDF AND PLOT  —  PIPELINE NOTES
+                   Rawle Lab  ·  Williams College  ·  Matthew D. Mitchell
+==========================================================================================
+
+  Human-readable overview of Part D. Original pipeline by Bob Rawle (Kasson Lab, UVA, 2016;
+  Rawle et al., Biophysical Journal 2016). 2026 updates by Matthew D. Mitchell, Rawle Lab,
+  Williams College. Most of Part D is Bob's original code with targeted updates noted below.
+
+
+==========================================================================================
+  WHAT THIS PART DOES
+==========================================================================================
+
+  Part D takes the per-experiment analyzed/reviewed trace files (from Part B or Part C) and
+  builds the CUMULATIVE DISTRIBUTION FUNCTION (CDF) of fusion wait times — i.e. the fraction
+  of viruses that have fused by each point in time. It also computes fusion EFFICIENCY (what
+  fraction of viruses fused at all). The CDF is the object Part E then fits kinetic models to.
+
+  Input:   one or more Part B / Part C output .mat files (…-AnalyzedTraces / …-Revd).
+  Output:  a compiled .mat containing DataToSave, CDFData (the CDF), and Options — the input
+           to Part E. Saved as MAT v7.3 so files over 2 GB work.
+
+
+==========================================================================================
+  HOW TO RUN
+==========================================================================================
+
+  1. Check Setup_Options_Compile_CDF.m — see the options below.
+  2. Run An_Easy_Start_CDF.m (set the data folder near the top) — it calls Start_Compile_CDF.
+  3. Select the .mat file(s). Confirm the options when prompted; the CDF plots are drawn and
+     the compiled file is saved.
+
+
+==========================================================================================
+  HOW THE PROGRAM FLOWS
+==========================================================================================
+
+  An_Easy_Start_CDF
+    -> Start_Compile_CDF(DataLocation)
+         -> Select_Files()                       pick one file, or several to combine
+         -> Setup_Options_Compile_CDF()          returns Options; confirm at console
+         -> Initialize_Figures()
+         -> if combining:  Combine_Trace_Analysis_Data()   merge several files into one set
+            if single:     load the one file
+         -> if excluding outliers:  Correct_Trace_Analysis_Data()
+         -> Report_Effective_Dead_Time()         [NEW] cross-check dead time (see below)
+         -> Compile_CDF_and_Plot()               build + plot the CDF; uses Extract_Data()
+                                                 and Generate_Prop_Cum()
+         -> save DataToSave + CDFData + Options
+
+
+==========================================================================================
+  THE OPTIONS YOU ACTUALLY SET (Setup_Options_Compile_CDF.m)
+==========================================================================================
+
+  CombineMultipleFiles     'y' to merge several files of the SAME condition into one CDF.
+                           Files must be in the same folder so you can multi-select them.
+  ComboFileName            output name when combining.
+
+  ToIncludeInEfficiencyCalculation   what counts in the denominator of fusion efficiency:
+                           'Fuse1 and No Fusion' (default), or variants that also count
+                           Fuse2 / Unbound / All. This decides whether, e.g., unbinders are
+                           excluded from "how many could have fused."
+  ShowFractionUnbound      'y' to also report NumberUnbound / (Fuse1 + NoFuse + Unbound).
+
+  ExcludeOutlierPoints     'y' drops fusion events inside [LowEndOfExclusion, HiEndOfExclusion].
+                           Cannot be combined with CombineMultipleFiles.
+  TimeCutoffLow / High     drop events with wait times below/above these (High = NaN means none).
+  DeadTime                 lag at the start of the experiment before fusion can be measured.
+                           SeV people set this to TimeCutoffLow; DENV people set it to 0.
+  FusionTrigger            'Binding' (this lab) or 'pH' — changes how data is extracted.
+
+  IMPORTANT: ALL data trimming/editing must happen HERE in Part D — you cannot do it in
+  Part E. If you trim or edit, write it in your lab notebook. Do not change the "ask Bob
+  first" options without asking Bob first.
+
+
+==========================================================================================
+  WHAT'S NEW OR CHANGED IN 2026 (Matthew)
+==========================================================================================
+
+  · Report_Effective_Dead_Time.m (NEW).  Each Part B file now records an "effective dead
+    time" — the real-world time (minutes) of the first frame that was actually scored.
+    This new check compares the longest effective dead time across the selected files
+    against the DeadTime you set, and WARNS if the assumed dead time is too short (which
+    would mean some events you're treating as "after the dead time" hadn't actually been
+    measurable yet). Old-format files without the field are reported and skipped from the
+    check rather than crashing.
+
+  · Correct_Trace_Analysis_Data.m now also honors the reviewer's 'User Erased' designation.
+
+  · Combine / Extract / Start scripts updated to carry the new EffectiveDeadTime field
+    through, and to save large outputs as MAT v7.3.
+
+  · The rest of Part D (Compile_CDF_and_Plot, Generate_Prop_Cum, Initialize_Figures) is
+    Bob's original code, unchanged.
+
+==========================================================================================

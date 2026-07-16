@@ -1,0 +1,104 @@
+
+==========================================================================================
+                     CDF ANALYSIS, FITTING, ETC  —  PIPELINE NOTES
+                   Rawle Lab  ·  Williams College  ·  Matthew D. Mitchell
+==========================================================================================
+
+  Human-readable overview of Part E. Part E is very close to Bob Rawle's original code
+  (Kasson Lab, UVA, 2016; Rawle et al., Biophysical Journal 2016; updated Williams College,
+  2024). The only 2026 change by Matthew D. Mitchell in this folder is a small options tweak
+  in Setup_Options_CDFAnalysis.m — the fitting and statistics math is Bob's.
+
+
+==========================================================================================
+  WHAT THIS PART DOES
+==========================================================================================
+
+  Part E is the LAST stage. It takes the compiled CDF(s) from Part D and:
+     · plots the CDFs together (optionally normalized) for comparison,
+     · plots fusion efficiencies (with optional bootstrap error bars),
+     · fits kinetic models to the CDF (single-exponential and gamma), and
+     · computes the randomness parameter / Nmin (how many rate-limiting steps the kinetics
+       imply), with bootstrap confidence intervals,
+     · prints a results report summarizing all of the above.
+
+  Input:   one or more compiled CDF .mat files from Part D.
+  Output:  figures + an on-screen results report (CDFReports). Nothing new is saved by
+           default; this is the analysis/interpretation stage.
+
+
+==========================================================================================
+  HOW TO RUN
+==========================================================================================
+
+  1. Check Setup_Options_CDFAnalysis.m — pick which analysis modules to run (see below).
+  2. Run An_Easy_Start_CDFAnalysis.m — it calls Start_CDFAnalysis and opens a file picker.
+  3. Select the compiled CDF file(s). Figures and the report are produced automatically.
+
+
+==========================================================================================
+  HOW THE PROGRAM FLOWS
+==========================================================================================
+
+  An_Easy_Start_CDFAnalysis
+    -> Start_CDFAnalysis(DataLocation)
+         -> Select_Files()                       pick one or several compiled CDFs
+         -> Setup_Options_CDFAnalysis()
+         -> Initialize_Figures()
+         -> load each file, set its plot label
+         -> CDF_Report_Setup()                   start the results report
+         -> Plot_CDFs()                          always drawn
+         -> Plot_Efficiencies()                  always drawn
+         -> if not SimpleComparisonOnly:
+              -> Randomness_Parameter_Analysis()  (if CalcRandomParam = 'y')
+              -> Fit_CDFs_And_Plot_Fits()         (if a Fit… module is on)
+                    uses Fit_Type_Sorter, Model_Single_Exp, Model_Gamma
+         -> CDF_Report_Display()                 print the report
+
+
+==========================================================================================
+  THE OPTIONS YOU ACTUALLY SET (Setup_Options_CDFAnalysis.m)
+==========================================================================================
+
+  DataLabel                'Filename' or 'CDF Name' — how each dataset is labeled on plots.
+  SimpleComparisonOnly     'y' = just plot CDFs + efficiencies and stop (skip all fitting/stats).
+  NormalizeCDFsInComparisonPlot   'y' to overlay CDFs normalized to their own plateau.
+
+  AccountForDeadTime       'y' to fold the Part D dead time into the randomness/fit modules.
+                           (The dead-time number itself is set back in Part D.) SeV: 'y';
+                           DENV: 'n'.
+
+  CalcRandomParam          'y' to compute the randomness parameter / Nmin with bootstrap CIs
+                           (ConfInt_RandParam, NumberBootstraps_RandParam).
+
+  RunFit_SingleFitMultipleCDFs   'y' runs the FIRST fit type on ALL datasets.
+  RunFit_MultipleFitsSingleCDF   'y' runs ALL listed fit types on the FIRST dataset only.
+  FitToPerform(n).FitType        '1 Exp' or 'Gamma'.
+
+
+==========================================================================================
+  THE FILES
+==========================================================================================
+
+  Driver / setup:  An_Easy_Start_CDFAnalysis, Start_CDFAnalysis, Setup_Options_CDFAnalysis,
+                   Initialize_Figures, Choose_Color
+  Plotting:        Plot_CDFs, Plot_Efficiencies, barwitherr (third-party error-bar helper)
+  Fitting:         Fit_CDFs_And_Plot_Fits, Fit_Type_Sorter, Model_Single_Exp, Model_Gamma
+  Stats:           Randomness_Parameter_Analysis
+  Reporting:       CDF_Report_Setup, CDF_Report_Display
+  Old/ :           Bob's earlier versions of these analyses, kept for reference.
+
+
+==========================================================================================
+  NOTES / GOTCHAS
+==========================================================================================
+
+  · If a CDF has 0 or 1 fusion events, fitting will error — the code was not built for that.
+  · Running a single CDF can error when drawing the efficiency error-bar chart; run multiple
+    CDFs to get around it.
+  · All data trimming must be done in Part D, not here.
+  · 2026 change (Matthew): minor cleanup of commented option blocks in
+    Setup_Options_CDFAnalysis.m (bootstrap-efficiency options re-commented consistently).
+    No change to the fitting or statistics behavior.
+
+==========================================================================================

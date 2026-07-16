@@ -1,1 +1,0 @@
-tzero 1, find 2, start 2, foc Nan, ignore Nan
