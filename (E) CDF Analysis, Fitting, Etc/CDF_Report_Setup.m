@@ -21,7 +21,18 @@ function [CDFReports] = CDF_Report_Setup(AllDataToAnalyze)
             CDFReports(FileNumber).IncludedInEfficiencyCalculation = AllDataToAnalyze(FileNumber).CDFData.Options.ToIncludeInEfficiencyCalculation;
             CDFReports(FileNumber).Unbinding= num2str(CurrCDFData.UsefulInfo.NumberUnbound) + "/" + ...
                         num2str(CurrCDFData.UsefulInfo.NumberVirusTotalInFractUnboundCalc) + "; " + num2str(CurrCDFData.UsefulInfo.FractionUnbound*100,'%.1f') + "%";
-            CDFReports(FileNumber).NumberOther = CurrCDFData.UsefulInfo.NumberOther;
+            
+            if isfield(CurrCDFData.UsefulInfo, 'NumberOther')
+                CDFReports(FileNumber).NumberOther = CurrCDFData.UsefulInfo.NumberOther;
+            elseif isfield(CurrCDFData.UsefulInfo,'NumberSlow_Other')
+                display("WARNING: Old File Format - make sure you want to do this")
+                CDFReports(FileNumber).NumberSlow_Other = CurrCDFData.UsefulInfo.NumberSlow_Other;
+            else
+                display("Incorrect File Format??")
+                StopProgram
+            end
+            
+            
 
     end
 
