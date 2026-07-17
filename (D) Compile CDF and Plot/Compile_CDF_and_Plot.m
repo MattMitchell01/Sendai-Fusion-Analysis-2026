@@ -9,21 +9,7 @@ function [ErrorFlag,DataToSave,CDFData] = Compile_CDF_and_Plot(DataFileName,...
         UsefulInfo.Name = TextFilenameWODot + "-CDF"; %This will be the combo filename if multiple files are combined
         UsefulInfo.Filepath = DataFilePath;
 
-        if strcmp(Options.ExcludeOutlierPoints,'y')
-            UsefulInfo.Name = UsefulInfo.Name + "-EDITED";
-        end
-
-        if Options.TimeCutoffLow ~= 0
-            if Options.DeadTime ~=0
-                UsefulInfo.Name = UsefulInfo.Name + "-DEAD" + num2str(Options.DeadTime);
-            else
-                UsefulInfo.Name = UsefulInfo.Name + "-BegTRIMMED";
-            end
-        end
-
-        if ~isnan(Options.TimeCutoffHigh) 
-            UsefulInfo.Name = UsefulInfo.Name + "-EndTRIMMED";
-        end
+        
 
 
     % Extract data, compile non-normalized CDF, calculate efficiency
@@ -46,8 +32,30 @@ function [ErrorFlag,DataToSave,CDFData] = Compile_CDF_and_Plot(DataFileName,...
         CDFData.Efficiency = Efficiency;
         CDFData.FusionTriggerType = Options.FusionTrigger;
         CDFData.DeadTime = Options.DeadTime;
+
+        if ~isnan(Options.TimeCutoffHigh)
+            CDFData.EndTime = Options.TimeCutoffHigh;
+        else
+            CDFData.EndTime = round(DataToSave.CombinedAnalyzedTraceData(1).TimeVector(end));
+        end
+
         CDFData.UsefulInfo = UsefulInfo;
         CDFData.Options = Options;
+
+    % Record modifiers for output filename
+        if strcmp(Options.ExcludeOutlierPoints,'y')
+            UsefulInfo.Name = UsefulInfo.Name + "-EDITED";
+        end
+
+        if Options.TimeCutoffLow ~= 0
+            if Options.DeadTime ~=0
+                UsefulInfo.Name = UsefulInfo.Name + "-DEAD" + num2str(Options.DeadTime);
+            else
+                UsefulInfo.Name = UsefulInfo.Name + "-BegTRIMMED";
+            end
+        end
+
+        UsefulInfo.Name = UsefulInfo.Name + "-END" + num2str(CDFData.EndTime);
    
  % Plot the data
         
