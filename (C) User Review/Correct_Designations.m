@@ -1,5 +1,5 @@
 function [RerunThisRound, CorrectedAnalysisData, ErrorCounter] = Correct_Designations(IncorrectPlotIndices,...
-    ~,CurrentTraceRange,CorrectedAnalysisData, ErrorCounter,Options,VideoTimeVector,FigureHandles,ClipWidth,ManualFocusSubtractIndices)
+    ~,CurrentTraceRange,CorrectedAnalysisData, ErrorCounter,Options,VideoTimeVector,FigureHandles,ClipWidth,ManualFocusSubtractIndices,ClearedIndexRanges)
 %
 % ------------------------------------------------------------------------
 % Substantially revised and expanded by Matthew D. Mitchell,
@@ -91,7 +91,7 @@ function [RerunThisRound, CorrectedAnalysisData, ErrorCounter] = Correct_Designa
         % again.
         while true
             [CorrectedAnalysisData, Success] = Apply_Designation_Code(MilliCode, CorrectedAnalysisData, ...
-                TraceNumberIndex, VideoTimeVector, Options, FigureHandles, false, ClipWidth, ManualFocusSubtractIndices);
+                TraceNumberIndex, VideoTimeVector, Options, FigureHandles, false, ClipWidth, ManualFocusSubtractIndices, ClearedIndexRanges);
             if Success
                 break
             end

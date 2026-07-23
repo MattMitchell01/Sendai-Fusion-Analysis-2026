@@ -1,5 +1,5 @@
 function [FigureHandles] = Plot_Current_Trace(FigureHandles, CurrentVirusData, VideoTimeVector, ClipWidth, ...
-    PlotCounter, CurrentTraceNumber, Options, DiagnosticOverlay, ManualFocusSubtractIndices)
+    PlotCounter, CurrentTraceNumber, Options, DiagnosticOverlay, ManualFocusSubtractIndices, ClearedIndexRanges)
 %
 % ------------------------------------------------------------------------
 % Substantially revised and expanded by Matthew D. Mitchell,
@@ -32,8 +32,8 @@ function [FigureHandles] = Plot_Current_Trace(FigureHandles, CurrentVirusData, V
 % DiagnosticOverlay (optional, default []) is a forward-compat extension
 % point for High-tier overlays, carrying whichever optional fields a given
 % subgroup needs:
-%   .ShowFocusDots -- draws every focus event as a red/black/blue dot
-%     triple via Plot_Focus_Dot_Markers.m (the same marker
+%   .ShowFocusDots -- draws every focus event as a red/black dot pair
+%     via Plot_Focus_Dot_Markers.m (the same marker
 %     Fix_Fusion_Wait_Time.m/Fix_Unbind_Wait_Time.m already draw in the
 %     blown-up picker figure). Used by H2a, H2b, H3, and H5.
 %   .TitleSuffix -- an extra line appended to the subplot title. Used by
@@ -55,6 +55,14 @@ function [FigureHandles] = Plot_Current_Trace(FigureHandles, CurrentVirusData, V
 % above (H2a/H2b only, auto-detected), this is universal and manually
 % curated, and can compose with that H2 correction on the same trace.
 %
+% ClearedIndexRanges (optional, default []) -- session-wide, growing Nx2
+% list of reviewer-registered [Start,End] clipped-coordinate index ranges
+% (Start_User_Review.m's 'c' round command), NaN'd out via
+% Apply_Cleared_Index_Ranges.m so no dots/line are drawn there, on EVERY
+% trace where in-bounds. Purely a display exclusion -- never touches saved
+% data, unlike the focus-jump corrections above. Applied AFTER Run_Med
+% smoothing (see below), not before, so it can't be interpolated across.
+%
 % Plots the CLIPPED trace (Clip_Trace_For_Review) since that's the
 % coordinate system FuseFrameNumbers/etc. are meaningful in. Part B
 % stores FusionData.FuseFrameNumbers in GLOBAL coordinates (see
@@ -67,6 +75,9 @@ if nargin < 8
 end
 if nargin < 9
     ManualFocusSubtractIndices = [];
+end
+if nargin < 10
+    ClearedIndexRanges = [];
 end
 
 FusionData    = CurrentVirusData.FusionData;
@@ -95,24 +106,34 @@ end
 % correction above (a trace can get both). Runs BEFORE Run_Med for the
 % same reason: a 1-2 frame focus spike is what the median smoother would
 % suppress/underestimate.
+%
+% Deliberately does NOT add a title suffix for this -- per the user, an
+% "(Manual focus correction applied)" line was cluttering/distorting the
+% subplot title. The correction is still applied to the plotted trace
+% itself; only the title annotation was removed. (H2's 'Focus-jump
+% corrected' and H4's failed-test label are unaffected -- those stay.)
 if ~isempty(ManualFocusSubtractIndices)
-    [ClippedTrace, ManualCorrectionApplied] = Apply_Manual_Focus_Corrections(ClippedTrace, ManualFocusSubtractIndices);
-    if ManualCorrectionApplied
-        if isempty(DiagnosticOverlay)
-            DiagnosticOverlay = struct();
-        end
-        if isfield(DiagnosticOverlay, 'TitleSuffix') && ~isempty(DiagnosticOverlay.TitleSuffix)
-            % Don't clobber an existing suffix (H2's 'Focus-jump corrected'
-            % or H4's failed-test label) -- append as a new line instead.
-            DiagnosticOverlay.TitleSuffix = sprintf('%s\n(Manual focus correction applied)', DiagnosticOverlay.TitleSuffix);
-        else
-            DiagnosticOverlay.TitleSuffix = '(Manual focus correction applied)';
-        end
-    end
+    ClippedTrace = Apply_Manual_Focus_Corrections(ClippedTrace, ManualFocusSubtractIndices);
 end
 
 if strcmp(Options.UseRunMed, 'y')
     ClippedTrace = Run_Med(ClippedTrace, Options);
+end
+
+% Reviewer-curated "clear dots" exclusion ('c' round command) -- runs
+% AFTER Run_Med, not before, unlike the focus-jump corrections above:
+% Run_Med.m's median(...,'omitnan') would otherwise interpolate right
+% across a NaN'd gap using real neighboring values and silently un-clear
+% it. Applying this last, right before the trace is drawn, guarantees the
+% excluded indices reach plot() as NaN -- MATLAB draws a broken line there
+% natively, never an interpolated jump across the gap.
+%
+% Deliberately does NOT add a title suffix for this either, same reasoning
+% as the manual focus correction above -- "(Dots cleared in registered
+% range(s))" was cluttering/distorting the subplot title. The exclusion
+% itself is still applied to the plotted trace.
+if ~isempty(ClearedIndexRanges)
+    ClippedTrace = Apply_Cleared_Index_Ranges(ClippedTrace, ClearedIndexRanges);
 end
 
 % Focus-event frames are NOT gapped out here -- every index is plotted,

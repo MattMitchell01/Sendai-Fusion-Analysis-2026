@@ -18,7 +18,7 @@
 disp('====================================');
 disp('   Part C  —  User Review Traces');
 
-% ── Data location: comment one line, uncomment the other ───────────────────
+% ── Data location: comment one line, uncomment the other ─.──────────────────
 % Matt recommends that you manually set the DataLocation to the Master Analysis
 % folder on whatever computer you are using that way grabbing the individual
 % data files is easier.

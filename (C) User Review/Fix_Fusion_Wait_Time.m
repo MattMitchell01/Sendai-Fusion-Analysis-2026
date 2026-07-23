@@ -1,4 +1,4 @@
-function [CorrectedAnalysisData] = Fix_Fusion_Wait_Time(CorrectedAnalysisData, VideoTimeVector, FigureHandles, TraceNumberIndex, Options, NumClicksNeeded, ClipWidth, ManualFocusSubtractIndices)
+function [CorrectedAnalysisData] = Fix_Fusion_Wait_Time(CorrectedAnalysisData, VideoTimeVector, FigureHandles, TraceNumberIndex, Options, NumClicksNeeded, ClipWidth, ManualFocusSubtractIndices, ClearedIndexRanges)
 %
 % ------------------------------------------------------------------------
 % Written by Matthew D. Mitchell, Rawle Lab, Williams College, 2026.
@@ -59,7 +59,7 @@ function [CorrectedAnalysisData] = Fix_Fusion_Wait_Time(CorrectedAnalysisData, V
 
         set(0,'CurrentFigure',FigureHandles.FixWaitPlot)
         [~, ClippedFrameNums] = Plot_Trace_With_Focus_Markers(TraceStruct, ...
-            strcat("Trace ID = ", num2str(TraceNumberIndex)), ClipWidth, Options, ManualFocusSubtractIndices);
+            strcat("Trace ID = ", num2str(TraceStruct.VirusIDNumber)), ClipWidth, Options, ManualFocusSubtractIndices, ClearedIndexRanges);
 
         LineToPlot = ylim;
 
@@ -134,7 +134,7 @@ function [CorrectedAnalysisData] = Fix_Fusion_Wait_Time(CorrectedAnalysisData, V
                     % ConfirmLoop stays true -- reprompt this same question, no replot/reclick
                 else
                     [CorrectedAnalysisData, Success] = Apply_Designation_Code(MilliCode, CorrectedAnalysisData, ...
-                        TraceNumberIndex, VideoTimeVector, Options, FigureHandles, true, ClipWidth, ManualFocusSubtractIndices);
+                        TraceNumberIndex, VideoTimeVector, Options, FigureHandles, true, ClipWidth, ManualFocusSubtractIndices, ClearedIndexRanges);
                     if Success
                         Redirected = true;
                         AskUserAgain = 'n';

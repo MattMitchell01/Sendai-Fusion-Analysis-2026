@@ -12,8 +12,13 @@ function [TriggerFocusFrame_Clipped] = Get_H2_Focus_Jump_Trigger_Frame(CurrentVi
 %
 % Get_H2_Focus_Jump_Trigger_Frame  Identify the single focus-event frame
 % (Part C clipped coordinates) responsible for an H2a/H2b High-priority
-% flag, for Plot_Current_Trace.m's focus-jump-removal overlay. Returns []
-% if none can be reliably identified.
+% flag, for the focus-jump-removal overlay shared by Plot_Current_Trace.m
+% (master grid) and Plot_Trace_With_Focus_Markers.m (the blown-up picker
+% figure) -- both callers key off the trace's own frozen
+% Review_PriorityData.Rule (this function returns [] for any non-H2a/H2b
+% trace), never off which Segment/Tier is currently being reviewed, so the
+% two figures can never disagree about whether a given trace is
+% jump-corrected. Returns [] if none can be reliably identified.
 %
 % Review_PriorityData.Score15Frames / .TriggerFusionFrame /
 % .TriggerFocusFrame (set by Part B's Assign_Review_Priority.m) live in

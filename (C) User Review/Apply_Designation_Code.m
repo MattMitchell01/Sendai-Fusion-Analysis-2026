@@ -1,5 +1,5 @@
 function [CorrectedAnalysisData, Success] = Apply_Designation_Code(MilliCode, CorrectedAnalysisData, ...
-    TraceNumberIndex, VideoTimeVector, Options, FigureHandles, ConfirmZeroClick, ClipWidth, ManualFocusSubtractIndices)
+    TraceNumberIndex, VideoTimeVector, Options, FigureHandles, ConfirmZeroClick, ClipWidth, ManualFocusSubtractIndices, ClearedIndexRanges)
 %
 % ------------------------------------------------------------------------
 % Written by Matthew D. Mitchell, Rawle Lab, Williams College, 2026.
@@ -44,6 +44,9 @@ function [CorrectedAnalysisData, Success] = Apply_Designation_Code(MilliCode, Co
     if nargin < 9
         ManualFocusSubtractIndices = [];
     end
+    if nargin < 10
+        ClearedIndexRanges = [];
+    end
 
     Success = true;
     CodeTable = Get_Designation_Code_Table();
@@ -80,9 +83,9 @@ function [CorrectedAnalysisData, Success] = Apply_Designation_Code(MilliCode, Co
 
     if Entry.NumClicks > 0 && strcmp(Options.FixWaitTime,"y")
         if strcmp(Entry.ClickTarget,'Fuse')
-            CorrectedAnalysisData = Fix_Fusion_Wait_Time(CorrectedAnalysisData,VideoTimeVector,FigureHandles,TraceNumberIndex,Options,Entry.NumClicks,ClipWidth,ManualFocusSubtractIndices);
+            CorrectedAnalysisData = Fix_Fusion_Wait_Time(CorrectedAnalysisData,VideoTimeVector,FigureHandles,TraceNumberIndex,Options,Entry.NumClicks,ClipWidth,ManualFocusSubtractIndices,ClearedIndexRanges);
         elseif strcmp(Entry.ClickTarget,'Unbound')
-            CorrectedAnalysisData = Fix_Unbind_Wait_Time(CorrectedAnalysisData,VideoTimeVector,FigureHandles,TraceNumberIndex,Options,ClipWidth,ManualFocusSubtractIndices);
+            CorrectedAnalysisData = Fix_Unbind_Wait_Time(CorrectedAnalysisData,VideoTimeVector,FigureHandles,TraceNumberIndex,Options,ClipWidth,ManualFocusSubtractIndices,ClearedIndexRanges);
         end
     elseif ConfirmZeroClick
         Confirmed = false;
@@ -100,7 +103,7 @@ function [CorrectedAnalysisData, Success] = Apply_Designation_Code(MilliCode, Co
                     fprintf('Unrecognized input -- enter blank/y to confirm, or a designation code (.0,.1,.11,.2,.22,.3,.33,.9).\n');
                 else
                     [CorrectedAnalysisData, RecurseSuccess] = Apply_Designation_Code(NewMilliCode, ...
-                        CorrectedAnalysisData, TraceNumberIndex, VideoTimeVector, Options, FigureHandles, true, ClipWidth, ManualFocusSubtractIndices);
+                        CorrectedAnalysisData, TraceNumberIndex, VideoTimeVector, Options, FigureHandles, true, ClipWidth, ManualFocusSubtractIndices, ClearedIndexRanges);
                     if RecurseSuccess
                         Confirmed = true;   % nested call (or its own further chain) already confirmed
                     end

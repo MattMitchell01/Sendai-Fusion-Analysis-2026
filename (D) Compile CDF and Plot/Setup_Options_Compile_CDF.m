@@ -10,7 +10,7 @@ function [Options] = Setup_Options_Compile_CDF()
 
 % -----General Options-----    
     
-    Options.CombineMultipleFiles = 'n'; % 'y' if you want to combine multiple
+    Options.CombineMultipleFiles = 'y'; % 'y' if you want to combine multiple
             % analyzed files into a single CDF (same experimental
             % condition). 
             % Files to be combined need to be in the same folder so you can select

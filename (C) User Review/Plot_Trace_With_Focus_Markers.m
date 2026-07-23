@@ -1,4 +1,4 @@
-function [ClippedTrace, ClippedFrameNums] = Plot_Trace_With_Focus_Markers(TraceStruct, TitleStr, ClipWidth, Options, ManualFocusSubtractIndices)
+function [ClippedTrace, ClippedFrameNums] = Plot_Trace_With_Focus_Markers(TraceStruct, TitleStr, ClipWidth, Options, ManualFocusSubtractIndices, ClearedIndexRanges)
 %
 % ------------------------------------------------------------------------
 % Written by Matthew D. Mitchell, Rawle Lab, Williams College, 2026.
@@ -11,7 +11,7 @@ function [ClippedTrace, ClippedFrameNums] = Plot_Trace_With_Focus_Markers(TraceS
 % ------------------------------------------------------------------------
 %
 % Plot_Trace_With_Focus_Markers  Draws the clipped trace + bind-frame line
-% + focus-frame dot-triple overlay into whatever figure/axes is currently
+% + focus-frame dot-pair overlay into whatever figure/axes is currently
 % current (caller sets that via set(0,'CurrentFigure',...) first, same
 % convention as the callers below).
 %
@@ -29,21 +29,69 @@ function [ClippedTrace, ClippedFrameNums] = Plot_Trace_With_Focus_Markers(TraceS
 % Start_User_Review.m's 's' round command (see Plot_Current_Trace.m for the
 % full explanation) -- applied here too so this figure never shows a raw
 % trace the master grid doesn't.
+%
+% ClearedIndexRanges -- session-wide, reviewer-registered list of
+% [Start,End] ranges from Start_User_Review.m's 'c' round command (see
+% Plot_Current_Trace.m for the full explanation) -- applied here too so
+% this figure never shows a gap the master grid doesn't. Applied AFTER
+% Run_Med (see below), same reasoning as Plot_Current_Trace.m: Run_Med's
+% median(...,'omitnan') would otherwise interpolate right across a NaN'd
+% gap using real neighboring values and silently un-clear it.
 
-    % Deliberately does NOT apply Run_Med here, even when Options.UseRunMed
-    % is 'y' -- this figure is for picking an exact frame (fuse/unbind), so
-    % it always shows the RAW trace, unlike the master grid
-    % (Plot_Current_Trace.m), which does smooth when that option is on.
     [ClippedTrace, ClippedFocusFrames] = Clip_Trace_For_Review(TraceStruct);
+
+    % Same automatic H2a/H2b focus-jump-removal correction the master grid
+    % applies (Plot_Current_Trace.m) -- gated on the trace's OWN frozen
+    % Review_PriorityData.Rule (via Get_H2_Focus_Jump_Trigger_Frame.m,
+    % which already returns [] for any non-H2a/H2b trace), not on which
+    % Segment/Tier happened to call this function -- this picker has no
+    % Segment in scope at all, so keying off the trace's own data is both
+    % simpler and guarantees this can never disagree with the master grid
+    % about whether a given trace is jump-corrected. Runs BEFORE the manual
+    % correction and Run_Med below, same order Plot_Current_Trace.m uses
+    % and for the same reason: a 1-2 frame focus spike is exactly what the
+    % median smoother would suppress/underestimate if applied first.
+    FocusJumpCorrected = false;
+    if strcmp(Options.ApplyH2FocusJumpCorrection, 'y') && ~isempty(ClipWidth)
+        TriggerFrame = Get_H2_Focus_Jump_Trigger_Frame(TraceStruct, ClippedFocusFrames, ClipWidth);
+        if ~isempty(TriggerFrame) && TriggerFrame >= 2 && TriggerFrame <= numel(ClippedTrace)
+            FocusJump = ClippedTrace(TriggerFrame) - ClippedTrace(TriggerFrame - 1);
+            ClippedTrace(TriggerFrame:end) = ClippedTrace(TriggerFrame:end) - FocusJump;
+            FocusJumpCorrected = true;
+        end
+    end
 
     % Same manual, reviewer-curated correction the master grid applies
     % (Plot_Current_Trace.m) -- for consistency, this picker figure should
-    % never show a raw trace the grid itself doesn't. Order relative to
-    % the dead-zone crop below doesn't matter -- this only changes values,
-    % never the trace's length.
-    ManualCorrectionApplied = false;
+    % never show a raw trace the grid itself doesn't. Runs BEFORE Run_Med,
+    % same reasoning as Plot_Current_Trace.m: a 1-2 frame focus spike is
+    % what the median smoother would suppress/underestimate if applied first.
+    % No title annotation for this -- per the user, "(Manual focus
+    % correction applied)" was cluttering/distorting the title. The
+    % correction itself is still applied to the plotted trace.
     if ~isempty(ManualFocusSubtractIndices)
-        [ClippedTrace, ManualCorrectionApplied] = Apply_Manual_Focus_Corrections(ClippedTrace, ManualFocusSubtractIndices);
+        ClippedTrace = Apply_Manual_Focus_Corrections(ClippedTrace, ManualFocusSubtractIndices);
+    end
+
+    % Same running-median smoothing as the master grid (Plot_Current_Trace.m),
+    % gated on the same Options.UseRunMed/Options.RunMedHalfLength -- one
+    % setting controls smoothing everywhere in Part C, so a trace never
+    % looks different here than it does in the grid it was flagged from.
+    % Smoothing only changes VALUES, never the trace's length/index
+    % alignment, so the click-matching against ClippedFrameNums below (and
+    % the frame numbers stored back into FusionData/UnboundData) are
+    % unaffected either way.
+    if strcmp(Options.UseRunMed, 'y')
+        ClippedTrace = Run_Med(ClippedTrace, Options);
+    end
+
+    % Reviewer-curated "clear dots" exclusion ('c' round command) -- same
+    % NaN-gap treatment as Plot_Current_Trace.m, applied here too so this
+    % picker figure is never gap-free where the master grid isn't. No title
+    % annotation for this either, same reasoning as the manual correction
+    % above -- the exclusion itself is still applied to the plotted trace.
+    if ~isempty(ClearedIndexRanges)
+        ClippedTrace = Apply_Cleared_Index_Ranges(ClippedTrace, ClearedIndexRanges);
     end
 
     % Same dead-zone exclusion as the master grid (Plot_Current_Trace.m):
@@ -52,9 +100,7 @@ function [ClippedTrace, ClippedFrameNums] = Plot_Trace_With_Focus_Markers(TraceS
     % should never be able to pick one here either -- otherwise this figure
     % could offer a click target the master grid never showed at all.
     % Gated on Options.UseRunMed the same way the master grid's crop is, so
-    % the two stay in lockstep regardless of that setting; only the
-    % smoothing itself (never applied here) differs between the two, by
-    % design, for precise click-picking.
+    % the two stay in lockstep regardless of that setting.
     VisibleStart = 1;
     VisibleEnd = numel(ClippedTrace);
     if strcmp(Options.UseRunMed, 'y') && ~isempty(ClipWidth) && ClipWidth > 0 ...
@@ -91,8 +137,8 @@ function [ClippedTrace, ClippedFrameNums] = Plot_Trace_With_Focus_Markers(TraceS
     end
 
     plot(ClippedFrameNums, ClippedTrace(VisibleStart:VisibleEnd), TraceColor)
-    if ManualCorrectionApplied
-        title(sprintf('%s\n(Manual focus correction applied)', TitleStr))
+    if FocusJumpCorrected
+        title(sprintf('%s\nFocus-jump corrected', TitleStr))
     else
         title(TitleStr)
     end
@@ -100,10 +146,9 @@ function [ClippedTrace, ClippedFrameNums] = Plot_Trace_With_Focus_Markers(TraceS
     LineToPlot = ylim;
     plot([ClippedBindFrame, ClippedBindFrame], LineToPlot, 'k--')
 
-    % Focus-frame overlay: red dot before / black dot on / blue dot after
-    % each focus event, on the actual (un-gapped) trace values, so the
-    % reviewer can see the jump when picking a frame. Shared with
-    % Plot_Current_Trace.m's High-tier H2a/H2b overlay -- see
-    % Plot_Focus_Dot_Markers.m.
+    % Focus-frame overlay: red dot before / black dot on each focus event,
+    % on the actual (un-gapped) trace values, so the reviewer can see the
+    % jump when picking a frame. Shared with Plot_Current_Trace.m's
+    % High-tier H2a/H2b overlay -- see Plot_Focus_Dot_Markers.m.
     Plot_Focus_Dot_Markers(ClippedTrace, ClippedFocusFrames);
 end

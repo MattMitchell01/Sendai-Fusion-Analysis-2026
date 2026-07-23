@@ -38,9 +38,9 @@ function [Options] = Setup_Options_User_Review()
             % User Review File will cause Start_User_Review to no longer
             % recognize that file (see Get_User_Review_File_Path.m).
 
-        Options.Low    = struct('Rows', 3, 'Cols', 4);
+        Options.Low    = struct('Rows', 4, 'Cols', 5);
         Options.Medium = struct('Rows', 3, 'Cols', 4);
-        Options.High   = struct('Rows', 2, 'Cols', 4);
+        Options.High   = struct('Rows', 3, 'Cols', 4);
             % Shared grid for every High subgroup EXCEPT H1 (H2a, H2b, H3,
             % H4, H5 all use this one uniform setting -- not a per-subgroup
             % override each, on purpose, since none of them need a layout
@@ -74,7 +74,7 @@ function [Options] = Setup_Options_User_Review()
         Options.ExpandXAxis = 'y'; %will expand the x-axis so the beginning/end of the trace aren't obscured by y-axis
 
         Options.ShowFocusDotsAlways = 'y';
-            % Global override: draw the red/black/blue focus-event dot
+            % Global override: draw the red/black focus-event dot
             % overlay (Plot_Focus_Dot_Markers.m) on every trace in every
             % segment -- Low, Medium, and all six High subgroups -- not
             % just H2a/H2b/H3/H4/H5, which already always show it
@@ -108,7 +108,7 @@ function [Options] = Setup_Options_User_Review()
             % cross-experiment Key_Traces_Collection.mat, in the same master
             % analysis folder. See Extract_Future_Key_Traces.m.
 
-        Options.ReviewOldDataMode = 'n';
+        Options.ReviewOldDataMode = 'y';
             % 'y' when reviewing a legacy dataset reprocessed through Part R
             % (Convert_Legacy_ProgramA_Output.m / Flag_Legacy_Disagreements.m).
             % Auto-disables ReportPerformanceLog/ExtractKeyTraces above (see
@@ -116,7 +116,7 @@ function [Options] = Setup_Options_User_Review()
             % writes into the shared cross-dataset master tracking files used
             % for live-pipeline QA.
 
-        Options.ReviewOldDataOnlyDifferences = 'n';
+        Options.ReviewOldDataOnlyDifferences = 'y';
             % Only meaningful when ReviewOldDataMode='y'. 'y' filters the
             % review queue down to traces with .IsLegacyDisagreement==true
             % (set by Flag_Legacy_Disagreements.m) before Low/Medium/High/

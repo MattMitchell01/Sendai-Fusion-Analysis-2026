@@ -85,6 +85,9 @@ if IsResuming
     if ~isfield(ReviewMeta, 'ManualFocusSubtractIndices')
         ReviewMeta.ManualFocusSubtractIndices = [];
     end
+    if ~isfield(ReviewMeta, 'ClearedIndexRanges')
+        ReviewMeta.ClearedIndexRanges = zeros(0,2);
+    end
 
     % Grid/layout metadata (Rows/Cols/TracesPerBatch/NumBatches) is purely a
     % display/batching concern -- it has zero bearing on which traces belong
@@ -126,6 +129,7 @@ else
         'HighOverrides', Get_High_Overrides(Options));
     ReviewMeta.FinalHarvestComplete = false;
     ReviewMeta.ManualFocusSubtractIndices = [];
+    ReviewMeta.ClearedIndexRanges = zeros(0,2);
 
     Save_User_Review_File(UserReviewFilePath, DataToSave, ReviewQueue, CurrentQueuePosition, ReviewMeta);
 
@@ -205,6 +209,11 @@ end
 % before every subsequent Save_User_Review_File call.
 ManualFocusSubtractIndices = ReviewMeta.ManualFocusSubtractIndices;
 
+% Session-wide, growing, persisted list of reviewer "clear dots" index
+% ranges ('c' round command) -- same seeding/threading/persistence pattern
+% as ManualFocusSubtractIndices immediately above, see Process_Review_Segment.
+ClearedIndexRanges = ReviewMeta.ClearedIndexRanges;
+
 ActiveSegments = ReviewQueue.Segments(ismember({ReviewQueue.Segments.Tier}, {'Low','Medium'}) | ...
     ismember({ReviewQueue.Segments.SubgroupName}, {'H1','H2a','H2b','H3','H4','H5'}));
 
@@ -224,9 +233,9 @@ while s >= 1 && s <= numel(ActiveSegments)
         continue
     end
 
-    [DataToSave, CurrentQueuePosition, Quit, ManualFocusSubtractIndices] = Process_Review_Segment(ActiveSegments, s, DataToSave, ...
+    [DataToSave, CurrentQueuePosition, Quit, ManualFocusSubtractIndices, ClearedIndexRanges] = Process_Review_Segment(ActiveSegments, s, DataToSave, ...
         VideoTimeVector, ClipWidth, Options, UserReviewFilePath, ReviewQueue, ReviewMeta, CurrentQueuePosition, ...
-        GlobalFindingImageFrame, GlobalFocusFrameNumbers, ManualFocusSubtractIndices);
+        GlobalFindingImageFrame, GlobalFocusFrameNumbers, ManualFocusSubtractIndices, ClearedIndexRanges);
 
     if Quit
         disp(' ')
@@ -290,6 +299,7 @@ if ~ReviewMeta.FinalHarvestComplete
 
     ReviewMeta.FinalHarvestComplete = true;
     ReviewMeta.ManualFocusSubtractIndices = ManualFocusSubtractIndices;
+    ReviewMeta.ClearedIndexRanges = ClearedIndexRanges;
     Save_User_Review_File(UserReviewFilePath, DataToSave, ReviewQueue, CurrentQueuePosition, ReviewMeta);
 else
     disp(' ')
@@ -328,9 +338,9 @@ disp('====================================')
 
 end
 
-function [DataToSave, CurrentQueuePosition, Quit, ManualFocusSubtractIndices] = Process_Review_Segment(ActiveSegments, SegmentIdx, DataToSave, ...
+function [DataToSave, CurrentQueuePosition, Quit, ManualFocusSubtractIndices, ClearedIndexRanges] = Process_Review_Segment(ActiveSegments, SegmentIdx, DataToSave, ...
     VideoTimeVector, ClipWidth, Options, UserReviewFilePath, ReviewQueue, ReviewMeta, CurrentQueuePosition, ...
-    GlobalFindingImageFrame, GlobalFocusFrameNumbers, ManualFocusSubtractIndices)
+    GlobalFindingImageFrame, GlobalFocusFrameNumbers, ManualFocusSubtractIndices, ClearedIndexRanges)
 % Process_Review_Segment  Round-by-round review loop for ONE ReviewQueue
 % segment (ActiveSegments(SegmentIdx)). Tier-agnostic -- driven entirely by
 % the Segment row's own Tier/SubgroupName/StartIndex/EndIndex/Rows/Cols;
@@ -346,6 +356,12 @@ function [DataToSave, CurrentQueuePosition, Quit, ManualFocusSubtractIndices] = 
 % Apply_Manual_Focus_Corrections.m) -- ManualFocusSubtractIndices is now a
 % genuine OUTPUT of this function too (grows via 's'), unlike every other
 % input here, which only ever flows in.
+%
+% ClearedIndexRanges (session-wide, growing Nx2 list of [Start,End]
+% clipped-coordinate ranges) is for the 'c' round command ("clear dots",
+% see Plot_Current_Trace.m / Apply_Cleared_Index_Ranges.m) -- same
+% in-and-out-growing-OUTPUT treatment as ManualFocusSubtractIndices, same
+% reasoning.
 
     Segment = ActiveSegments(SegmentIdx);
     Quit = false;
@@ -387,8 +403,8 @@ function [DataToSave, CurrentQueuePosition, Quit, ManualFocusSubtractIndices] = 
     end
 
     % H2a/H2b/H3/H5: same single-pane Plot_Current_Trace layout as
-    % Low/Medium, just with every focus event drawn on top (red/black/blue
-    % dot triple, same marker Fix_Fusion_Wait_Time.m/Fix_Unbind_Wait_Time.m
+    % Low/Medium, just with every focus event drawn on top (red/black
+    % dot pair, same marker Fix_Fusion_Wait_Time.m/Fix_Unbind_Wait_Time.m
     % already use in the blown-up picker) -- see Plot_Focus_Dot_Markers.m.
     % No pane-layout change needed here, unlike H1, so this is just an
     % extra DiagnosticOverlay argument on the ordinary call. H4 gets the
@@ -440,7 +456,7 @@ function [DataToSave, CurrentQueuePosition, Quit, ManualFocusSubtractIndices] = 
         % reasoning documented there still applies on every call, not just
         % this first one.
         Plot_Review_Batch(FigureHandles, Segment, DataToSave, CurrentTraceRange, VideoTimeVector, ClipWidth, ...
-            Options, IsH1PairLayout, ShowFocusDotsGlobal, NeedsFocusDotOverlay, ApplyH2Correction, ManualFocusSubtractIndices);
+            Options, IsH1PairLayout, ShowFocusDotsGlobal, NeedsFocusDotOverlay, ApplyH2Correction, ManualFocusSubtractIndices, ClearedIndexRanges);
 
         PreviousAnalysisData = DataToSave.CombinedAnalyzedTraceData;
         ErrorCounter = 0;
@@ -455,11 +471,13 @@ function [DataToSave, CurrentQueuePosition, Quit, ManualFocusSubtractIndices] = 
             if ManualFocusAvailable
                 fprintf('  s       = subtract a focus jump from all traces\n');
             end
+            fprintf('  c       = clear dots in an index range from all traces\n');
             fprintf('  q       = quit and save\n');
             RawInput = strtrim(input('> ','s'));
 
             if strcmpi(RawInput,'q')
                 ReviewMeta.ManualFocusSubtractIndices = ManualFocusSubtractIndices;
+                ReviewMeta.ClearedIndexRanges = ClearedIndexRanges;
                 Save_User_Review_File(UserReviewFilePath, DataToSave, ReviewQueue, CurrentQueuePosition, ReviewMeta);
                 Quit = true;
                 return
@@ -532,7 +550,23 @@ function [DataToSave, CurrentQueuePosition, Quit, ManualFocusSubtractIndices] = 
                     % straight back to it.
                     Plot_Review_Batch(FigureHandles, Segment, DataToSave, CurrentTraceRange, VideoTimeVector, ClipWidth, ...
                         Options, IsH1PairLayout, ShowFocusDotsGlobal, NeedsFocusDotOverlay, ApplyH2Correction, ...
-                        ManualFocusSubtractIndices);
+                        ManualFocusSubtractIndices, ClearedIndexRanges);
+                end
+                continue
+            end
+
+            if strcmpi(RawInput,'c')
+                [ClearedIndexRanges, AnyRegistered] = Prompt_Manual_Clear_Dots_Range(ClearedIndexRanges);
+
+                if AnyRegistered
+                    % Same "meaningful reviewer work -- save immediately,
+                    % replot now" treatment as the 's' branch above.
+                    ReviewMeta.ClearedIndexRanges = ClearedIndexRanges;
+                    Save_User_Review_File(UserReviewFilePath, DataToSave, ReviewQueue, CurrentQueuePosition, ReviewMeta);
+
+                    Plot_Review_Batch(FigureHandles, Segment, DataToSave, CurrentTraceRange, VideoTimeVector, ClipWidth, ...
+                        Options, IsH1PairLayout, ShowFocusDotsGlobal, NeedsFocusDotOverlay, ApplyH2Correction, ...
+                        ManualFocusSubtractIndices, ClearedIndexRanges);
                 end
                 continue
             end
@@ -582,7 +616,7 @@ function [DataToSave, CurrentQueuePosition, Quit, ManualFocusSubtractIndices] = 
 
             [RerunThisRound, CorrectedAnalysisData, ErrorCounter] = Correct_Designations(IncorrectPlotIndices, ...
                 PreviousAnalysisData, CurrentTraceRange, DataToSave.CombinedAnalyzedTraceData, ErrorCounter, ...
-                Options, VideoTimeVector, FigureHandles, ClipWidth, ManualFocusSubtractIndices);
+                Options, VideoTimeVector, FigureHandles, ClipWidth, ManualFocusSubtractIndices, ClearedIndexRanges);
 
             DataToSave.CombinedAnalyzedTraceData = CorrectedAnalysisData;
         end
@@ -598,12 +632,13 @@ function [DataToSave, CurrentQueuePosition, Quit, ManualFocusSubtractIndices] = 
 
         CurrentQueuePosition = BatchEnd + 1;
         ReviewMeta.ManualFocusSubtractIndices = ManualFocusSubtractIndices;
+        ReviewMeta.ClearedIndexRanges = ClearedIndexRanges;
         Save_User_Review_File(UserReviewFilePath, DataToSave, ReviewQueue, CurrentQueuePosition, ReviewMeta);
     end
 end
 
 function Plot_Review_Batch(FigureHandles, Segment, DataToSave, CurrentTraceRange, VideoTimeVector, ClipWidth, ...
-    Options, IsH1PairLayout, ShowFocusDotsGlobal, NeedsFocusDotOverlay, ApplyH2Correction, ManualFocusSubtractIndices)
+    Options, IsH1PairLayout, ShowFocusDotsGlobal, NeedsFocusDotOverlay, ApplyH2Correction, ManualFocusSubtractIndices, ClearedIndexRanges)
 % Plot_Review_Batch  Draws CurrentTraceRange into FigureHandles' subplot
 % grid -- the per-round drawing pass Process_Review_Segment's outer while
 % loop always ran exactly once at the top of each batch, now also callable
@@ -647,22 +682,22 @@ function Plot_Review_Batch(FigureHandles, Segment, DataToSave, CurrentTraceRange
                 H1Overlay = struct('ShowFocusDots', true);
             end
             Plot_Trace_Pair_H1(FigureHandles, DataToSave.CombinedAnalyzedTraceData(GlobalIdx), ...
-                VideoTimeVector, ClipWidth, k, GlobalIdx, Options, Segment, H1Overlay, ManualFocusSubtractIndices);
+                VideoTimeVector, ClipWidth, k, GlobalIdx, Options, Segment, H1Overlay, ManualFocusSubtractIndices, ClearedIndexRanges);
         elseif strcmp(Segment.SubgroupName, 'H4')
             Overlay = struct('ShowFocusDots', true, ...
                 'TitleSuffix', Get_H4_Failed_Test_Label(DataToSave.CombinedAnalyzedTraceData(GlobalIdx)));
             Plot_Current_Trace(FigureHandles, DataToSave.CombinedAnalyzedTraceData(GlobalIdx), ...
-                VideoTimeVector, ClipWidth, k, GlobalIdx, Options, Overlay, ManualFocusSubtractIndices);
+                VideoTimeVector, ClipWidth, k, GlobalIdx, Options, Overlay, ManualFocusSubtractIndices, ClearedIndexRanges);
         elseif ApplyH2Correction
             Overlay = struct('ShowFocusDots', true, 'ApplyFocusJumpCorrection', true);
             Plot_Current_Trace(FigureHandles, DataToSave.CombinedAnalyzedTraceData(GlobalIdx), ...
-                VideoTimeVector, ClipWidth, k, GlobalIdx, Options, Overlay, ManualFocusSubtractIndices);
+                VideoTimeVector, ClipWidth, k, GlobalIdx, Options, Overlay, ManualFocusSubtractIndices, ClearedIndexRanges);
         elseif NeedsFocusDotOverlay
             Plot_Current_Trace(FigureHandles, DataToSave.CombinedAnalyzedTraceData(GlobalIdx), ...
-                VideoTimeVector, ClipWidth, k, GlobalIdx, Options, struct('ShowFocusDots', true), ManualFocusSubtractIndices);
+                VideoTimeVector, ClipWidth, k, GlobalIdx, Options, struct('ShowFocusDots', true), ManualFocusSubtractIndices, ClearedIndexRanges);
         else
             Plot_Current_Trace(FigureHandles, DataToSave.CombinedAnalyzedTraceData(GlobalIdx), ...
-                VideoTimeVector, ClipWidth, k, GlobalIdx, Options, [], ManualFocusSubtractIndices);
+                VideoTimeVector, ClipWidth, k, GlobalIdx, Options, [], ManualFocusSubtractIndices, ClearedIndexRanges);
         end
     end
 end
@@ -843,17 +878,29 @@ function [ManualFocusSubtractIndices, AnyRegistered] = Prompt_Manual_Focus_Corre
 % Apply_Manual_Focus_Corrections.m -- so no further per-trace validity
 % check is needed here.
 %
-% Loops back for another entry after each successful (or duplicate)
-% registration; exits only on 'N' (blank is not a shortcut -- it falls
-% through to the "not a whole number" reprompt like any other bad entry).
+% Loops back for another entry after each successful add/undo; exits only
+% on 'N' (blank is not a shortcut -- it falls through to the "not a whole
+% number" reprompt like any other bad entry).
 %
-% AnyRegistered is true iff at least one NEW index was actually added this
+% Entering an index a SECOND time undoes it -- toggles it back out of
+% ManualFocusSubtractIndices -- rather than being rejected as a duplicate.
+% The current list is reprinted at the top of every iteration so the
+% reviewer can see exactly what's registered (and therefore what typing a
+% given index again will do) before entering the next one.
+%
+% AnyRegistered is true iff the list actually changed (add OR undo) this
 % call -- lets the caller (Process_Review_Segment) skip the immediate
-% save/replot when the reviewer types 's' and then immediately backs out.
+% save/replot when the reviewer types 's' and then immediately backs out
+% without registering or undoing anything.
 
     AnyRegistered = false;
     while true
-        fprintf('\nEnter a focus-frame index as you see it on the plots (n to stop):\n');
+        if isempty(ManualFocusSubtractIndices)
+            fprintf('\nCurrent subtracted focus frame(s): (none)\n');
+        else
+            fprintf('\nCurrent subtracted focus frame(s): %s\n', mat2str(ManualFocusSubtractIndices));
+        end
+        fprintf('Enter a focus-frame index as you see it on the plots (entering one already listed above undoes it; n to stop):\n');
         RawInput = strtrim(input('> ','s'));
         if strcmpi(RawInput,'n')
             return
@@ -865,20 +912,24 @@ function [ManualFocusSubtractIndices, AnyRegistered] = Prompt_Manual_Focus_Corre
             continue
         end
 
+        if ismember(EnteredIdx, ManualFocusSubtractIndices)
+            ManualFocusSubtractIndices(ManualFocusSubtractIndices == EnteredIdx) = [];
+            AnyRegistered = true;
+            fprintf('Frame %d un-registered. The jump due to focus at frame %d will no longer be subtracted out.\n', ...
+                EnteredIdx, EnteredIdx);
+            continue
+        end
+
         [Valid, Message] = Resolve_Manual_Focus_Index(EnteredIdx, GlobalFindingImageFrame, GlobalFocusFrameNumbers);
         if ~Valid
             fprintf('%s\n', Message);
             continue   % re-prompt for the SAME entry
         end
 
-        if ismember(EnteredIdx, ManualFocusSubtractIndices)
-            fprintf('Frame %d is already registered -- skipping duplicate.\n', EnteredIdx);
-        else
-            ManualFocusSubtractIndices = sort([ManualFocusSubtractIndices, EnteredIdx]);
-            AnyRegistered = true;
-            fprintf('Frame %d Registered. The jump due to focus at frame %d will now be subtracted out on every trace.\n', ...
-                EnteredIdx, EnteredIdx);
-        end
+        ManualFocusSubtractIndices = sort([ManualFocusSubtractIndices, EnteredIdx]);
+        AnyRegistered = true;
+        fprintf('Frame %d Registered. The jump due to focus at frame %d will now be subtracted out on every trace.\n', ...
+            EnteredIdx, EnteredIdx);
     end
 end
 
@@ -895,6 +946,81 @@ function [Valid, Message] = Resolve_Manual_Focus_Index(EnteredIdx, GlobalFinding
     else
         Valid = false;
         Message = sprintf('Frame %d was not a focus frame.', EnteredIdx);
+    end
+end
+
+function [ClearedIndexRanges, AnyRegistered] = Prompt_Manual_Clear_Dots_Range(ClearedIndexRanges)
+% Prompt_Manual_Clear_Dots_Range  Interactive loop for the round-prompt
+% 'c' command -- registers one or more reviewer-specified inclusive index
+% ranges (entered in clipped coordinates, same as the master grid's x-axis)
+% into the session-wide, growing ClearedIndexRanges list (Nx2, one
+% [Start,End] row per registered range). Points inside a registered range
+% are NaN'd out on every trace where in-bounds (Apply_Cleared_Index_Ranges.m)
+% -- purely a display exclusion, never touches saved data.
+%
+% Unlike Prompt_Manual_Focus_Correction/Resolve_Manual_Focus_Index, there's
+% no dataset-wide semantic check to run here (no equivalent of "is this
+% actually a known focus frame") -- any positive whole-number range is
+% accepted at registration time; per-trace bounds are handled later,
+% per-trace, by Apply_Cleared_Index_Ranges.
+%
+% Loops back for another entry after each successful add/undo; exits only
+% on 'n' (blank is not a shortcut -- it falls through to the "couldn't
+% parse" reprompt like any other bad entry).
+%
+% Entering a range a SECOND time undoes it -- toggles it back out of
+% ClearedIndexRanges -- rather than being rejected as a duplicate. The
+% current list is reprinted at the top of every iteration so the reviewer
+% can see exactly what's registered (and therefore what typing a given
+% range again will do) before entering the next one.
+%
+% AnyRegistered is true iff the list actually changed (add OR undo) this
+% call -- lets the caller (Process_Review_Segment) skip the immediate
+% save/replot when the reviewer types 'c' and then immediately backs out
+% without registering or undoing anything.
+
+    AnyRegistered = false;
+    while true
+        if isempty(ClearedIndexRanges)
+            fprintf('\nCurrent cleared range(s): (none)\n');
+        else
+            RangeStrs = arrayfun(@(i) sprintf('%d-%d', ClearedIndexRanges(i,1), ClearedIndexRanges(i,2)), ...
+                1:size(ClearedIndexRanges,1), 'UniformOutput', false);
+            fprintf('\nCurrent cleared range(s): %s\n', strjoin(RangeStrs, ', '));
+        end
+        fprintf('Enter two indices to clear (comma or space separated), inclusive (entering a range already listed above undoes it; n to stop):\n');
+        RawInput = strtrim(input('> ','s'));
+        if strcmpi(RawInput,'n')
+            return
+        end
+
+        Tokens = strsplit(strrep(RawInput, ',', ' '));
+        Tokens = Tokens(~cellfun(@isempty, Tokens));
+
+        if numel(Tokens) ~= 2
+            fprintf('Enter exactly two indices, comma or space separated (e.g. "50, 120" or "50 120") -- try again.\n');
+            continue
+        end
+
+        Values = str2double(Tokens);
+        if any(isnan(Values)) || any(Values ~= floor(Values)) || any(Values < 1)
+            fprintf('Both entries must be positive whole numbers -- try again.\n');
+            continue
+        end
+
+        Range = sort(Values);   % accept either order
+
+        if ismember(Range, ClearedIndexRanges, 'rows')
+            MatchRow = ClearedIndexRanges(:,1) == Range(1) & ClearedIndexRanges(:,2) == Range(2);
+            ClearedIndexRanges(MatchRow, :) = [];
+            AnyRegistered = true;
+            fprintf('Range %d-%d un-registered. Points in this range will be plotted normally again.\n', Range(1), Range(2));
+        else
+            ClearedIndexRanges = sortrows([ClearedIndexRanges; Range]);
+            AnyRegistered = true;
+            fprintf('Indices %d-%d registered. Points in this range will no longer be plotted on any trace.\n', ...
+                Range(1), Range(2));
+        end
     end
 end
 

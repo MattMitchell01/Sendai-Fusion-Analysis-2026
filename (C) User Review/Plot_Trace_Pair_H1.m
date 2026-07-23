@@ -1,5 +1,5 @@
 function [FigureHandles] = Plot_Trace_Pair_H1(FigureHandles, CurrentVirusData, VideoTimeVector, ClipWidth, ...
-    PlotCounter, CurrentTraceNumber, Options, Segment, DiagnosticOverlay, ManualFocusSubtractIndices)
+    PlotCounter, CurrentTraceNumber, Options, Segment, DiagnosticOverlay, ManualFocusSubtractIndices, ClearedIndexRanges)
 %
 % ------------------------------------------------------------------------
 % Written by Matthew D. Mitchell, Rawle Lab, Williams College, 2026.
@@ -41,12 +41,18 @@ function [FigureHandles] = Plot_Trace_Pair_H1(FigureHandles, CurrentVirusData, V
 %
 % ManualFocusSubtractIndices (optional, default []) is likewise forwarded
 % unchanged to both panes -- see Plot_Current_Trace.m for what it does.
+%
+% ClearedIndexRanges (optional, default []) is likewise forwarded
+% unchanged to both panes -- see Plot_Current_Trace.m for what it does.
 
     if nargin < 9
         DiagnosticOverlay = [];
     end
     if nargin < 10
         ManualFocusSubtractIndices = [];
+    end
+    if nargin < 11
+        ClearedIndexRanges = [];
     end
 
     assert(Segment.Rows == 2, 'Plot_Trace_Pair_H1:UnsupportedGrid', ...
@@ -64,13 +70,13 @@ function [FigureHandles] = Plot_Trace_Pair_H1(FigureHandles, CurrentVirusData, V
     % title (only the axes lookup is clamped to the lone handle).
     FullFH.MasterWindow = FigureHandles.MasterWindow;
     FullFH.SubHandles = FullAxes;
-    Plot_Current_Trace(FullFH, CurrentVirusData, VideoTimeVector, ClipWidth, PlotCounter, CurrentTraceNumber, Options, DiagnosticOverlay, ManualFocusSubtractIndices);
+    Plot_Current_Trace(FullFH, CurrentVirusData, VideoTimeVector, ClipWidth, PlotCounter, CurrentTraceNumber, Options, DiagnosticOverlay, ManualFocusSubtractIndices, ClearedIndexRanges);
 
     % Zoom pane: same call, then crop to the first/last 100 clipped-
     % coordinate frames per EdgeLocation and relabel the title.
     ZoomFH.MasterWindow = FigureHandles.MasterWindow;
     ZoomFH.SubHandles = ZoomAxes;
-    Plot_Current_Trace(ZoomFH, CurrentVirusData, VideoTimeVector, ClipWidth, PlotCounter, CurrentTraceNumber, Options, DiagnosticOverlay, ManualFocusSubtractIndices);
+    Plot_Current_Trace(ZoomFH, CurrentVirusData, VideoTimeVector, ClipWidth, PlotCounter, CurrentTraceNumber, Options, DiagnosticOverlay, ManualFocusSubtractIndices, ClearedIndexRanges);
 
     [ClippedTrace, ~] = Clip_Trace_For_Review(CurrentVirusData);
     ClipLen = numel(ClippedTrace);
